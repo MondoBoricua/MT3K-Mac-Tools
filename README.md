@@ -26,6 +26,22 @@ Think **Chris Titus winutil**, but built for macOS, SwiftUI, Homebrew, and the w
   <img src="img/mt3k-mac-tools-screenshot.png" alt="MT3K Mac Tools app screenshot" />
 </p>
 
+<table align="center">
+  <tr>
+    <td align="center"><img src="img/menubar-popover.png" alt="Menu bar popover: live CPU/GPU/RAM/disk/battery stats and quick toggles" width="260"></td>
+    <td align="center"><img src="img/ram-stats-popover.png" alt="Per-metric RAM meter with pressure, usage history and top processes" width="290"></td>
+    <td align="center">
+      <img src="img/flow-popover.png" alt="MT3K Flow dictation popover" width="280"><br><br>
+      <img src="img/displays-popover.png" alt="Displays popover: brightness, resolution and notch control" width="280">
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Menu bar suite</sub></td>
+    <td align="center"><sub>Per-metric meters</sub></td>
+    <td align="center"><sub>Flow dictation · Displays</sub></td>
+  </tr>
+</table>
+
 ## Download
 
 - **🚀 Ready-to-run app (signed):** patrons ($5+) on [**Patreon**](https://www.patreon.com/MT3K) get the pre-built, code-signed `.app` for every release — first, before the public release — and support development at the same time.
