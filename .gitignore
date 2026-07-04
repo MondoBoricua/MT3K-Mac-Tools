@@ -1,0 +1,35 @@
+# Swift Package Manager build artifacts
+.build/
+.swiftpm/
+*.xcodeproj/
+
+# Bundled .app output
+dist/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code project state (agent/session-local)
+.claude/
+
+# Local-only secrets / env
+*.env
+.env.local
+certs/
+
+# Local agent tooling
+graphify-out/
+
+# Maintainer-local files
+AGENTS.md
+CLAUDE.md
+MIGRATION.md
