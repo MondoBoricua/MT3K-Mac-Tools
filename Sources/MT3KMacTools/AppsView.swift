@@ -48,7 +48,7 @@ struct AppsView: View {
         }
     }
 
-    private let presets: [Preset] = [
+    static let presets: [Preset] = [
         .init(
             id: "developer",
             title: "Developer base",
@@ -59,19 +59,19 @@ struct AppsView: View {
             id: "ai-coding",
             title: "AI coding",
             symbol: "sparkles",
-            itemIDs: ["claude", "chatgpt", "claude-code", "codex-cli", "codex-desktop", "ollama", "lmstudio", "cursor", "windsurf"]
+            itemIDs: ["claude", "chatgpt", "claude-code", "codex-cli", "ollama", "lmstudio", "cursor", "devin-desktop"]
         ),
         .init(
             id: "security",
             title: "Security toolkit",
             symbol: "lock.shield.fill",
-            itemIDs: ["wireshark", "burp-suite", "owasp-zap", "proxyman", "nmap", "ffuf", "sqlmap", "hashcat", "john", "hydra"]
+            itemIDs: ["wireshark", "burp-suite", "proxyman", "nmap", "ffuf", "sqlmap", "hashcat", "john", "hydra"]
         ),
         .init(
             id: "creator",
             title: "Creator",
             symbol: "paintbrush.pointed.fill",
-            itemIDs: ["figma", "sketch", "affinity-designer", "affinity-photo", "blender", "krita", "obs"]
+            itemIDs: ["figma", "sketch", "affinity", "blender", "krita", "obs"]
         )
     ]
 
@@ -241,7 +241,7 @@ struct AppsView: View {
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)], spacing: 10) {
-                ForEach(presets) { preset in
+                ForEach(Self.presets) { preset in
                     Button {
                         selectedIDs.formUnion(preset.items.map(\.id))
                     } label: {
