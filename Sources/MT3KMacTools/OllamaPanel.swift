@@ -30,18 +30,18 @@ struct OllamaSuggestion: Identifiable, Hashable {
 }
 
 enum OllamaCatalog {
-    // Actualizado mayo 2026 — verificado contra ollama.com/library.
-    // Llama 4, Gemma 4, Qwen 3.6, Kimi K2.6, GLM-5.1, Phi 4 son los actuales.
+    // Actualizado octubre 2026 — verificado contra ollama.com/library.
+    // Llama 4, Gemma 4, Qwen 3.6, Kimi K2.6, GLM-5.3, Phi 4 son los actuales.
     static let popular: [OllamaSuggestion] = [
         // General — top tier
         .init(id: "llama4:scout", label: "Llama 4 Scout", category: "General",
               summary: "Meta · top open-source 2026, balanced quality. Requiere ~25 GB."),
-        .init(id: "gemma4:9b", label: "Gemma 4 9B", category: "General",
-              summary: "Google · tool calling + visión nativa, ~6 GB. (Abril 2026)"),
-        .init(id: "gemma4:27b", label: "Gemma 4 27B", category: "General",
-              summary: "Google · top quality, multimodal. ~18 GB."),
-        .init(id: "qwen3.6:8b", label: "Qwen 3.6 8B", category: "General",
-              summary: "Alibaba · sucesor estable de qwen3.5, multilingüe."),
+        .init(id: "gemma4:12b", label: "Gemma 4 12B", category: "General",
+              summary: "Google · tool calling + visión nativa, ~8 GB."),
+        .init(id: "gemma4:26b", label: "Gemma 4 26B", category: "General",
+              summary: "Google · top quality, multimodal. ~16-19 GB."),
+        .init(id: "qwen3.5:9b", label: "Qwen 3.5 9B", category: "General",
+              summary: "Alibaba · multilingüe con visión, ~6.6 GB. (Qwen 3.6 no trae tamaño chico.)"),
         .init(id: "llama3.3:70b", label: "Llama 3.3 70B", category: "General",
               summary: "Meta · sigue siendo sólido para rigs con >40 GB."),
         .init(id: "llama3.2:3b", label: "Llama 3.2 3B", category: "General",
@@ -54,10 +54,10 @@ enum OllamaCatalog {
         // Coding — los duros de 2026
         .init(id: "qwen3.6:27b", label: "Qwen 3.6 27B", category: "Coding",
               summary: "★ 77.2% SWE-bench. Top dense coder open-source. ~22 GB VRAM."),
-        .init(id: "kimi-k2.6", label: "Kimi K2.6", category: "Coding",
-              summary: "Moonshot · frontier MoE, 87/100 real-world coding score."),
-        .init(id: "glm-5.1", label: "GLM-5.1", category: "Coding",
-              summary: "Zhipu · agentic engineering, SOTA en SWE-Bench Pro."),
+        .init(id: "kimi-k2.6:cloud", label: "Kimi K2.6 (cloud)", category: "Coding",
+              summary: "Moonshot · frontier MoE. Corre en Ollama Cloud (sin descarga local)."),
+        .init(id: "glm-5.3:cloud", label: "GLM-5.3 (cloud)", category: "Coding",
+              summary: "Zhipu · agentic engineering. Corre en Ollama Cloud (sin descarga local)."),
         .init(id: "qwen2.5-coder:7b", label: "Qwen 2.5 Coder 7B", category: "Coding",
               summary: "Budget option, ~4 GB. Sigue siendo bueno."),
         .init(id: "qwen2.5-coder:14b", label: "Qwen 2.5 Coder 14B", category: "Coding",
@@ -83,7 +83,7 @@ enum OllamaCatalog {
 
         // Uncensored / abliterated — útil para Red Team / Security Lab cuando los
         // safety filters bloquean discusión legítima de CVEs, payloads, malware.
-        // Curado para Macs (8-32 GB RAM). Verificado contra ollama.com mayo 2026.
+        // Curado para Macs (8-32 GB RAM). Verificado contra ollama.com octubre 2026.
         .init(id: "joe-speedboat/Gemma-4-Uncensored-HauhauCS-Aggressive:e4b",
               label: "Gemma 4 Uncensored Aggressive (HauhauCS)",
               category: "Uncensored",
@@ -108,7 +108,7 @@ enum OllamaCatalog {
               label: "Dolphin 3 8B",
               category: "Uncensored",
               summary: "Eric Hartford · serie clásica, dataset sin reinforcement de refusal. Function calling. ~4.7 GB."),
-        .init(id: "joe-speedboat/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive",
+        .init(id: "joe-speedboat/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
               label: "Qwen 3.6 35B A3B Uncensored Aggressive",
               category: "Uncensored",
               summary: "MoE 35B (3B activos). Aggressive variant. Para Macs con 32+ GB."),

@@ -32,6 +32,14 @@ struct CatalogTests {
         #expect(dupes.isEmpty, "ids duplicados: \(dupes)")
     }
 
+    @Test("Los presets solo referencian ids que existen en el catálogo")
+    @MainActor
+    func presetIDsExist() {
+        let catalogIDs = Set(Catalog.items.map(\.id))
+        let orphanIDs = Set(AppsView.presets.flatMap(\.itemIDs)).subtracting(catalogIDs).sorted()
+        #expect(orphanIDs.isEmpty, "ids huérfanos: \(orphanIDs)")
+    }
+
     @Test("Todo appName termina en .app (detección en /Applications)")
     func appNamesWellFormed() {
         for item in Catalog.items {

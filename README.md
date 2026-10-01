@@ -113,7 +113,7 @@ The catalog supports:
 | Homebrew cask | `brew install --cask firefox` | GUI apps |
 | Homebrew formula | `brew install git` | CLI tools |
 | Brew tap | `brew install pear-devs/pear/pear-desktop` | External taps |
-| npm global | `npm install -g @pencil.dev/cli` | JS CLIs |
+| npm global | `npm install -g @pen.dev/cli` | JS CLIs |
 | Direct DMG | Architecture-aware download | Uses `hdiutil` |
 | GitHub latest | Release asset resolver | Regex-based asset matching |
 
@@ -122,9 +122,9 @@ The catalog supports:
 The catalog includes tools like:
 
 - Browsers: Brave, Firefox, Chrome, Arc, LibreWolf, Zen, Opera
-- AI/Coding: Claude, Codex Desktop, Codex CLI, Claude Code, Ollama, LM Studio, Cursor, Windsurf, Zed, Pear Desktop
+- AI/Coding: Claude, Codex CLI, Claude Code, Ollama, LM Studio, Cursor, Devin Desktop, Zed, Pear Desktop
 - Dev: Git (Homebrew), Node.js, GitHub CLI, OrbStack, iTerm2, Ghostty, tmux, Fish
-- Cybersecurity: Wireshark, Burp Suite CE, OWASP ZAP, Proxyman, nmap, ffuf, sqlmap, hashcat
+- Cybersecurity: Wireshark, Burp Suite CE, Proxyman, nmap, ffuf, sqlmap, hashcat
 - Productivity: Notion, Obsidian, Linear, Logseq, Craft, LibreOffice
 - Utilities: Raycast, Rectangle, Stats, Latest, Caffeine, Keka, AppCleaner, Windows App
 - Media: VLC, IINA, Moonlight, Spotify, OBS, GeForce Now
