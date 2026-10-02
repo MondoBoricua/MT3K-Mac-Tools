@@ -10,7 +10,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/srimanachanta/SMCKit.git", revision: "8286f3b11ad9801405e0be062a07e557fb654019"),
-        .package(url: "https://github.com/argmaxinc/WhisperKit.git", from: "0.9.0"),
+        .package(url: "https://github.com/argmaxinc/argmax-oss-swift", from: "1.1.0"),
     ],
     targets: [
         .target(
@@ -20,7 +20,7 @@ let package = Package(
         .executableTarget(
             name: "MT3KMacTools",
             dependencies: [
-                .product(name: "WhisperKit", package: "WhisperKit"),
+                .product(name: "WhisperKit", package: "argmax-oss-swift"),
             ],
             path: "Sources/MT3KMacTools"
         ),

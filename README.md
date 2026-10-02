@@ -72,7 +72,7 @@ Think **Chris Titus winutil**, but built for macOS, SwiftUI, Homebrew, and the w
 
 ### Native Mac App
 
-Built with Swift 6, SwiftUI, AppKit, Security, IOKit, and Foundation. Two third-party Swift packages, each scoped to one feature: [WhisperKit](https://github.com/argmaxinc/WhisperKit) (local CoreML transcription for Flow) and [SMCKit](https://github.com/srimanachanta/SMCKit) (SMC access for the Battery Guard helper, pinned revision).
+Built with Swift 6, SwiftUI, AppKit, Security, IOKit, and Foundation. Two third-party Swift packages, each scoped to one feature: [WhisperKit](https://github.com/argmaxinc/argmax-oss-swift) (local CoreML transcription for Flow) and [SMCKit](https://github.com/srimanachanta/SMCKit) (SMC access for the Battery Guard helper, pinned revision).
 
 ### Homebrew-Aware Catalog
 
