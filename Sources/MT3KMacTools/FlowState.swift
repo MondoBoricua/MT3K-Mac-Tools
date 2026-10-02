@@ -68,8 +68,8 @@ final class FlowState: ObservableObject {
         let provider = FlowProvider(rawValue: defaults.string(forKey: "flowProvider") ?? "") ?? .local
         let language = FlowLanguage(rawValue: defaults.string(forKey: "flowLanguage") ?? "") ?? .automatic
         let model = provider == .groq
-            ? defaults.string(forKey: "flowGroqModel") ?? "whisper-large-v3"
-            : defaults.string(forKey: "flowOpenAIModel") ?? "gpt-4o-transcribe"
+            ? defaults.string(forKey: "flowGroqModel") ?? FlowProvider.groqDefaultModel
+            : defaults.string(forKey: "flowOpenAIModel") ?? FlowProvider.openAIDefaultModel
 
         cleanupEnabled = defaults.object(forKey: "flowCleanupEnabled") as? Bool ?? true
         configureTranscription(provider: provider, model: model, language: language)
@@ -467,7 +467,7 @@ final class FlowState: ObservableObject {
     }
 
     private var defaultCloudModel: String {
-        activeProvider == .groq ? "whisper-large-v3" : "gpt-4o-transcribe"
+        activeProvider == .groq ? FlowProvider.groqDefaultModel : FlowProvider.openAIDefaultModel
     }
 
     private var pasteRestoreTask: Task<Void, Never>?

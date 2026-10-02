@@ -13,6 +13,11 @@ enum FlowProvider: String, CaseIterable, Identifiable {
     case openAI = "OpenAI"
 
     var id: String { rawValue }
+
+    // Modelos cloud por defecto (única fuente; el usuario puede cambiarlos en la UI).
+    static let groqDefaultModel = "whisper-large-v3"
+    // gpt-4o-transcribe y whisper-1 se retiran del API el 2027-02-26; gpt-transcribe es el reemplazo.
+    static let openAIDefaultModel = "gpt-transcribe"
 }
 
 enum FlowLanguage: String, CaseIterable, Identifiable {

@@ -13,8 +13,8 @@ struct FlowView: View {
     @AppStorage("flowCleanupEnabled") private var cleanupEnabled = true
     @AppStorage("flowMenuBarEnabled") private var flowEnabled = false
     @AppStorage("flowLocalModelID") private var localModelID = "argmaxinc/whisperkit-coreml"
-    @AppStorage("flowGroqModel") private var groqModel = "whisper-large-v3"
-    @AppStorage("flowOpenAIModel") private var openAIModel = "gpt-4o-transcribe"
+    @AppStorage("flowGroqModel") private var groqModel = FlowProvider.groqDefaultModel
+    @AppStorage("flowOpenAIModel") private var openAIModel = FlowProvider.openAIDefaultModel
     @State private var cloudAPIKey = ""
     @State private var capturingHotkey = false
     @State private var hotkeyMonitor: Any?
@@ -343,7 +343,7 @@ struct FlowView: View {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
                     GridRow {
                         Text("Modelo").foregroundStyle(Theme.textSecondary)
-                        TextField(provider == .groq ? "whisper-large-v3" : "gpt-4o-transcribe", text: cloudModelBinding)
+                        TextField(provider == .groq ? FlowProvider.groqDefaultModel : FlowProvider.openAIDefaultModel, text: cloudModelBinding)
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: 320)
                     }
@@ -492,8 +492,8 @@ struct FlowMenuBarContent: View {
     @AppStorage("flowMenuBarEnabled") private var flowEnabled = false
     @AppStorage("flowProvider") private var provider: FlowProvider = .local
     @AppStorage("flowLanguage") private var language: FlowLanguage = .automatic
-    @AppStorage("flowGroqModel") private var groqModel = "whisper-large-v3"
-    @AppStorage("flowOpenAIModel") private var openAIModel = "gpt-4o-transcribe"
+    @AppStorage("flowGroqModel") private var groqModel = FlowProvider.groqDefaultModel
+    @AppStorage("flowOpenAIModel") private var openAIModel = FlowProvider.openAIDefaultModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
