@@ -4,6 +4,48 @@ import Foundation
 /// Parsers puros extraídos para poder testearlos sin ejecutar comandos reales.
 /// Compartidos entre StatsState (Stats pane) y MenuBarBridge (popover).
 enum StatsParsers {
+    static func formatUptime(_ seconds: TimeInterval) -> String {
+        let totalMinutes = max(0, Int(seconds / 60))
+        let days = totalMinutes / 1440
+        let hours = (totalMinutes % 1440) / 60
+        let minutes = totalMinutes % 60
+        if days > 0 { return "\(days)d \(hours)h" }
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return "\(minutes)m"
+    }
+
+    struct ProcessTable {
+        let count: Int
+        let topCPU: [ProcessSample]
+        let topRAM: [ProcessSample]
+    }
+
+    static func processTable(fromPS raw: String, limit: Int) -> ProcessTable {
+        let rows = raw.split(whereSeparator: \.isNewline).compactMap { line -> (pid: String, name: String, cpu: Double, bytes: Double)? in
+            let parts = line.split(maxSplits: 3, whereSeparator: \.isWhitespace).map(String.init)
+            guard parts.count == 4, Int(parts[0]) != nil,
+                  let cpu = Double(parts[1]), cpu.isFinite,
+                  let rss = Int(parts[2]), rss >= 0 else { return nil }
+            return (parts[0], (parts[3] as NSString).lastPathComponent, cpu, Double(rss) * 1024)
+        }
+        let count = max(0, limit)
+        let cpu = rows.sorted { $0.cpu > $1.cpu }.prefix(count).map {
+            ProcessSample(id: "\($0.pid)-\($0.name)", pid: $0.pid, name: $0.name,
+                          value: String(format: "%.1f%%", $0.cpu), rawValue: $0.cpu)
+        }
+        let ram = rows.sorted { $0.bytes > $1.bytes }.prefix(count).map {
+            ProcessSample(id: "\($0.pid)-\($0.name)", pid: $0.pid, name: $0.name,
+                          value: formatBytes($0.bytes), rawValue: $0.bytes)
+        }
+        return ProcessTable(count: rows.count, topCPU: cpu, topRAM: ram)
+    }
+
+    static func formatBytes(_ bytes: Double) -> String {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        return f.string(fromByteCount: Int64(bytes))
+    }
+
     /// Cuenta de ciclos desde la salida de `ioreg -rn AppleSmartBattery`.
     /// Exige la key exacta "CycleCount": el substring aparece también en
     /// "DesignCycleCount9C" (~1000), que antes sobreescribía el valor real.

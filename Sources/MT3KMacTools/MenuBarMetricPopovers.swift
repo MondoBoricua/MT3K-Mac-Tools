@@ -201,7 +201,7 @@ private struct RAMMetricPopover: View {
             ])
             ProcessList(title: "Top processes", samples: bridge.topRAM)
         }
-        .task { await bridge.refresh(mode: .full) }
+        .task { await bridge.refreshMetric(.ram) }
     }
 }
 
@@ -240,7 +240,7 @@ private struct CPUMetricPopover: View {
             ])
             ProcessList(title: "Top processes", samples: bridge.topCPU)
         }
-        .task { await bridge.refresh(mode: .full) }
+        .task { await bridge.refreshMetric(.cpu) }
     }
 
     private var tempText: String {
@@ -274,7 +274,7 @@ private struct DiskMetricPopover: View {
             ])
             ProcessList(title: "Top processes", samples: bridge.topRAM)
         }
-        .task { await bridge.refresh(mode: .full) }
+        .task { await bridge.refreshMetric(.disk) }
     }
 }
 
@@ -300,7 +300,7 @@ private struct GPUMetricPopover: View {
                 .plain("Memory:", bridge.gpuMemoryGB <= 0 ? "—" : formatGB(bridge.gpuMemoryGB))
             ])
         }
-        .task { await bridge.refresh(mode: .full) }
+        .task { await bridge.refreshMetric(.gpu) }
     }
 }
 

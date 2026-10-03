@@ -100,20 +100,12 @@ final class InstallCoordinator: ObservableObject {
 
     // waitUntilExit bloquea el hilo; nunca ejecutarlo en el MainActor (hitch de UI en la cola).
     private func shellSucceeds(_ command: String) async -> Bool {
-        await Task.detached(priority: .userInitiated) {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            proc.arguments = ["-lc", command]
-            proc.standardOutput = Pipe()
-            proc.standardError = Pipe()
-            do {
-                try proc.run()
-                proc.waitUntilExit()
-                return proc.terminationStatus == 0
-            } catch {
-                return false
-            }
-        }.value
+        do {
+            _ = try await runShell(executable: "/bin/zsh", args: ["-lc", command])
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func shellQuote(_ value: String) -> String {
@@ -169,6 +161,7 @@ final class InstallCoordinator: ObservableObject {
 
             let message = lastMeaningful.isEmpty ? "Instalado correctamente" : lastMeaningful
             statuses[item.id] = .success(message)
+            NotificationCenter.default.post(name: .mt3kBrewStateChanged, object: nil)
             log.append("\(item.name) instalado.", level: .success)
         } catch {
             let errorLines = allLines.filter { $0.lowercased().contains("error:") }
@@ -231,6 +224,7 @@ final class InstallCoordinator: ObservableObject {
 
             let message = lastMeaningful.isEmpty ? "Actualizado correctamente" : lastMeaningful
             statuses[item.id] = .success(message)
+            NotificationCenter.default.post(name: .mt3kBrewStateChanged, object: nil)
             log.append("\(item.name) actualizado.", level: .success)
         } catch {
             let errorLines = allLines.filter { $0.lowercased().contains("error:") }
@@ -315,6 +309,7 @@ final class InstallCoordinator: ObservableObject {
                 let isReplaced = initialMTime != nil && mtime != nil && mtime! > initialMTime! && Date().timeIntervalSince(startTime) > 5
                 if isNew || isReplaced {
                     statuses[item.id] = .success("\(appName) instalado en /Applications")
+                    NotificationCenter.default.post(name: .mt3kBrewStateChanged, object: nil)
                     log.append("\(item.name) instalado.", level: .success)
                     return
                 }

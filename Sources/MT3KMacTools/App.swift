@@ -93,7 +93,6 @@ struct MT3KMacToolsApp: App {
                 .environmentObject(menuBarBridge)
                 .environmentObject(loginItemState)
                 .environmentObject(batteryGuardState)
-                .task { menuBarBridge.startPolling() }
         } label: {
             menuBarLabel
         }
@@ -141,6 +140,7 @@ struct MT3KMacToolsApp: App {
             CompactMetricMenuLabel(metric: metric)
                 .environmentObject(menuBarBridge)
                 .task { menuBarBridge.startCompactPolling(interval: 15) }
+                .onDisappear { menuBarBridge.stopCompactPollingIfUnused() }
         }
         .menuBarExtraStyle(.window)
     }

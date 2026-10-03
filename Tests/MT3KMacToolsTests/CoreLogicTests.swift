@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import MT3KMacTools
 
 // MARK: - OllamaState.isCloudModel
@@ -104,6 +105,28 @@ struct CycleCountTests {
 
 @Suite("Parsers de stats del sistema")
 struct StatsParsersTests {
+    @Test("Tabla de procesos: orden, rutas con espacios y límite")
+    func processTable() {
+        let raw = """
+        10 2.0 100 /usr/bin/first
+        20 80.5 200 /Applications/My App.app/Contents/MacOS/My App
+        basura sin columnas válidas
+        30 10.0 900 /usr/bin/third
+        40 50.0 300 /usr/bin/fourth
+        50 0.0 500 /usr/bin/fifth
+        """
+        let table = StatsParsers.processTable(fromPS: raw, limit: 3)
+        #expect(table.count == 5)
+        #expect(table.topCPU.map(\.pid) == ["20", "40", "30"])
+        #expect(table.topRAM.map(\.pid) == ["30", "50", "40"])
+        #expect(table.topCPU.first?.name == "My App")
+        #expect(table.topCPU.first?.id == "20-My App")
+        #expect(table.topCPU.first?.value == "80.5%")
+        #expect(table.topRAM.first?.value == StatsParsers.formatBytes(900 * 1024))
+        #expect(StatsParsers.processTable(fromPS: raw, limit: 10).topCPU.count == 5)
+        #expect(StatsParsers.processTable(fromPS: raw, limit: 0).topRAM.isEmpty)
+    }
+
     @Test("CPU desde top -l 1")
     func cpuFromTop() throws {
         let top = """
@@ -231,5 +254,64 @@ struct BatteryReadingParserTests {
     func noBattery() {
         let reading = BatteryGuardState.parseBattery("Now drawing from 'AC Power'\n")
         #expect(!reading.hasBattery)
+    }
+}
+
+@Suite("Lecturas nativas del sistema")
+struct SystemInfoTests {
+    @Test func physicalMemory() {
+        #expect(SystemInfo.physicalMemoryGB > 1)
+    }
+
+    @Test func bootTime() throws {
+        let boot = try #require(SystemInfo.bootTime)
+        #expect(boot < Date())
+        #expect(boot > Date(timeIntervalSince1970: 946684800))
+    }
+
+    @Test func swapUsage() throws {
+        let swap = try #require(SystemInfo.swapUsage)
+        #expect(swap.totalGB >= swap.usedGB)
+    }
+
+    @Test func loadAverages() throws {
+        let load = try #require(SystemInfo.loadAverages)
+        #expect(load.l1 >= 0)
+    }
+
+    @Test func thermalLevel() {
+        #expect((0...3).contains(SystemInfo.thermalLevel.state))
+    }
+
+    @Test func memoryPressure() {
+        #expect(["Normal", "Warning", "Critical"].contains(SystemInfo.memoryPressure.label))
+    }
+}
+
+@Suite("Ejecución de shell")
+struct ShellRunnerTests {
+    @Test("Drena stdout y stderr mayores al buffer del pipe")
+    func drainsLargeOutput() async throws {
+        let output = try await runShell(executable: "/bin/zsh", args: ["-c", """
+        for ((i=0; i<10000; i++)); do
+            print -r -- 'stdout-payload'
+            print -ru2 -- 'stderr-payload'
+        done
+        """])
+        #expect(output.components(separatedBy: "stdout-payload").count - 1 == 10000)
+        #expect(output.components(separatedBy: "stderr-payload").count - 1 == 10000)
+    }
+
+    @Test("Propaga entorno y rechaza salida no cero")
+    func environmentAndExitStatus() async throws {
+        let output = try await runShell(executable: "/bin/zsh", args: ["-c", "print -rn -- $MT3K_TEST_VALUE"],
+                                        extraEnv: ["MT3K_TEST_VALUE": "idle-check"])
+        #expect(output == "idle-check")
+        do {
+            _ = try await runShell(executable: "/bin/zsh", args: ["-c", "exit 7"])
+            Issue.record("Se esperaba error de salida")
+        } catch {
+            #expect((error as NSError).code == 7)
+        }
     }
 }

@@ -32,11 +32,9 @@ struct MenuBarContent: View {
         }
         .padding(10)
         .frame(width: 280)
-        .task {
-            async let metrics: Void = bridge.refresh()
-            async let bat: Void = battery.refresh()
-            _ = await (metrics, bat)
-        }
+        .onAppear { bridge.startPolling() }
+        .onDisappear { bridge.stopFullPolling() }
+        .task { await battery.refresh() }
     }
 
     private var header: some View {
