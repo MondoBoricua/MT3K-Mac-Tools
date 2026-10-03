@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreFoundation
 
 struct SystemView: View {
     @EnvironmentObject var log: LogStore
@@ -10,6 +11,8 @@ struct SystemView: View {
 
     @State private var snapshot = SystemSnapshot.empty
     @State private var isRefreshing = false
+    @State private var pendingRefresh = false
+    @State private var pendingSizeRefresh = false
     @State private var showHiddenFiles = false
     @State private var showExtensions = false
     @State private var showPathBar = false
@@ -183,16 +186,16 @@ struct SystemView: View {
             }
             actionRow {
                 SystemActionButton(title: "Limpiar caches", symbol: "sparkles", color: Theme.green) {
-                    Task { await runAndRefresh("Limpiando caches de usuario...", "rm -rf \"$HOME/Library/Caches\"/*") }
+                    Task { await runAndRefresh("Limpiando caches de usuario...", "rm -rf \"$HOME/Library/Caches\"/*", refreshSizes: true) }
                 }
                 SystemActionButton(title: "Limpiar Brew", symbol: "shippingbox.fill", color: Theme.green) {
-                    Task { await runAndRefresh("Limpiando cache de Homebrew...", "brew cleanup -s && rm -rf \"$(brew --cache)\"/*") }
+                    Task { await runAndRefresh("Limpiando cache de Homebrew...", "brew cleanup -s && rm -rf \"$(brew --cache)\"/*", refreshSizes: true) }
                 }
                 SystemActionButton(title: "Limpiar DerivedData", symbol: "hammer.fill", color: Theme.amber) {
-                    Task { await runAndRefresh("Limpiando Xcode DerivedData...", "rm -rf \"$HOME/Library/Developer/Xcode/DerivedData\"/*") }
+                    Task { await runAndRefresh("Limpiando Xcode DerivedData...", "rm -rf \"$HOME/Library/Developer/Xcode/DerivedData\"/*", refreshSizes: true) }
                 }
                 SystemActionButton(title: "Vaciar Trash", symbol: "trash.fill", color: Theme.accent) {
-                    Task { await runAndRefresh("Vaciando Trash del usuario...", "rm -rf \"$HOME/.Trash\"/*") }
+                    Task { await runAndRefresh("Vaciando Trash del usuario...", "rm -rf \"$HOME/.Trash\"/*", refreshSizes: true) }
                 }
             }
         }
@@ -352,10 +355,25 @@ struct SystemView: View {
         }
     }
 
-    private func refresh() async {
+    private func refresh(refreshSizes: Bool = true) async {
+        guard !isRefreshing else {
+            pendingRefresh = true
+            pendingSizeRefresh = pendingSizeRefresh || refreshSizes
+            return
+        }
         isRefreshing = true
-        defer { isRefreshing = false }
+        defer {
+            isRefreshing = false
+            if pendingRefresh {
+                let includeSizes = pendingSizeRefresh
+                pendingRefresh = false
+                pendingSizeRefresh = false
+                Task { await refresh(refreshSizes: includeSizes) }
+            }
+        }
+        let previousSizes = snapshot.sizes
         snapshot = await SystemSnapshot.capture()
+        snapshot.sizes = refreshSizes ? SystemSnapshot.Sizes() : previousSizes
         await powerState.refresh()
         showHiddenFiles = snapshot.showHiddenFiles
         showExtensions = snapshot.showExtensions
@@ -363,6 +381,7 @@ struct SystemView: View {
         showStatusBar = snapshot.showStatusBar
         dockAutohide = snapshot.dockAutohide
         screenshotType = snapshot.screenshotType.isEmpty ? "png" : snapshot.screenshotType
+        if refreshSizes { snapshot.sizes = await SystemSnapshot.captureSizes() }
     }
 
     private func applyFinderBool(_ key: String, value: Bool) {
@@ -399,7 +418,7 @@ struct SystemView: View {
         rm -rf "$HOME/.Trash"/*
         rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/*
         brew cleanup -s 2>/dev/null || true
-        """)
+        """, refreshSizes: true)
     }
 
     private func performancePreset() async {
@@ -413,16 +432,16 @@ struct SystemView: View {
         """)
     }
 
-    private func runAndRefresh(_ startMessage: String, _ command: String) async {
+    private func runAndRefresh(_ startMessage: String, _ command: String, refreshSizes: Bool = false) async {
         log.append(startMessage, level: .info)
         do {
             let output = try await runShell(executable: "/bin/zsh", args: ["-lc", command])
             let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { log.append(trimmed, level: .success) }
-            await refresh()
+            await refresh(refreshSizes: refreshSizes)
         } catch {
             log.append(error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines), level: .error)
-            await refresh()
+            await refresh(refreshSizes: refreshSizes)
         }
     }
 
@@ -458,7 +477,7 @@ struct SystemView: View {
     }
 }
 
-private struct SystemSnapshot {
+struct SystemSnapshot: Sendable {
     var macOS: String
     var hardware: String
     var uptime: String
@@ -495,8 +514,8 @@ private struct SystemSnapshot {
     static let empty = SystemSnapshot(
         macOS: "", hardware: "", uptime: "", diskFree: "", diskLooksOK: true,
         battery: "", batteryLooksOK: true, fileVault: "", firewall: "", gatekeeper: "",
-        sip: "", autoUpdate: false, userCachesSize: "-", userLogsSize: "-", derivedDataSize: "-",
-        brewCacheSize: "-", trashSize: "-", spotlightStatus: "", localIP: "",
+        sip: "", autoUpdate: false, userCachesSize: "…", userLogsSize: "…", derivedDataSize: "…",
+        brewCacheSize: "…", trashSize: "…", spotlightStatus: "", localIP: "",
         dnsServers: "", router: "", userLaunchAgentsCount: 0, systemLaunchAgentsCount: 0,
         systemLaunchDaemonsCount: 0, launchAgentsSummary: "", loginItems: "—",
         showHiddenFiles: false, showExtensions: false, showPathBar: false, showStatusBar: false,
@@ -504,54 +523,79 @@ private struct SystemSnapshot {
     )
 
     static func capture() async -> SystemSnapshot {
-        async let macOS = checked("sw_vers -productName; sw_vers -productVersion; sw_vers -buildVersion")
-        async let hardware = checked("sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m")
         let mem = String(format: "%.0f GB", SystemInfo.physicalMemoryGB)
         let uptime = SystemInfo.bootTime.map { StatsParsers.formatUptime(Date().timeIntervalSince($0)) } ?? ""
-        async let disk = checked("target='/System/Volumes/Data'; [ -d \"$target\" ] || target='/'; df -H \"$target\" | awk 'NR==2 {print $4 \" libres de \" $2 \" (\" $5 \" usado)\"}'")
-        async let diskPercent = checked("target='/System/Volumes/Data'; [ -d \"$target\" ] || target='/'; df \"$target\" | awk 'NR==2 {gsub(\"%\", \"\", $5); print $5}'")
-        async let battery = checked("""
+        let commands: [(String, String)] = [
+            ("macOS", "sw_vers -productName; sw_vers -productVersion; sw_vers -buildVersion"),
+            ("hardware", "sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m"),
+            ("disk", "target='/System/Volumes/Data'; [ -d \"$target\" ] || target='/'; df -H \"$target\" | awk 'NR==2 {print $4 \" libres de \" $2 \" (\" $5 \" usado)\"}'"),
+            ("diskPercent", "target='/System/Volumes/Data'; [ -d \"$target\" ] || target='/'; df \"$target\" | awk 'NR==2 {gsub(\"%\", \"\", $5); print $5}'"),
+            ("battery", """
         powerInfo=$(system_profiler SPPowerDataType 2>/dev/null)
         cycles=$(echo "$powerInfo" | awk -F': ' '/Cycle Count/ {print $2; exit}')
         condition=$(echo "$powerInfo" | awk -F': ' '/Condition/ {print $2; exit}')
         if [ -n "$cycles" ]; then echo "${condition:-Unknown}, ${cycles} ciclos"; else echo "No aplica"; fi
-        """)
-        async let fileVault = checked("fdesetup status 2>/dev/null | sed 's/FileVault is //'")
-        async let firewall = checked("/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null | sed 's/Firewall is //'")
-        async let gatekeeper = checked("spctl --status 2>/dev/null")
-        async let sip = checked("csrutil status 2>/dev/null | sed 's/System Integrity Protection status: //'")
-        async let userCaches = size("$HOME/Library/Caches")
-        async let userLogs = size("$HOME/Library/Logs")
-        async let derived = size("$HOME/Library/Developer/Xcode/DerivedData")
-        async let brewCache = checked("if command -v brew >/dev/null; then du -sh \"$(brew --cache)\" 2>/dev/null | awk '{print $1}'; else echo '-'; fi")
-        async let trash = size("$HOME/.Trash")
-        async let spotlight = checked("mdutil -s / 2>/dev/null | tail -1 | sed 's/^ *//'")
-        async let ip = checked("ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 'No detectada'")
-        async let dns = checked("scutil --dns | awk '/nameserver\\[[0-9]+\\]/ {print $3}' | sort -u | tr '\\n' ', ' | sed 's/, $//'")
-        async let router = checked("route -n get default 2>/dev/null | awk '/gateway/ {print $2; exit}'")
-        async let userAgents = checked("find \"$HOME/Library/LaunchAgents\" -maxdepth 1 -name '*.plist' 2>/dev/null | wc -l | tr -d ' '")
-        async let sysAgents = checked("find /Library/LaunchAgents -maxdepth 1 -name '*.plist' 2>/dev/null | wc -l | tr -d ' '")
-        async let daemons = checked("find /Library/LaunchDaemons -maxdepth 1 -name '*.plist' 2>/dev/null | wc -l | tr -d ' '")
-        async let hidden = checked("defaults read com.apple.finder AppleShowAllFiles 2>/dev/null || echo false")
-        async let ext = checked("defaults read NSGlobalDomain AppleShowAllExtensions 2>/dev/null || echo false")
-        async let pathBar = checked("defaults read com.apple.finder ShowPathbar 2>/dev/null || echo false")
-        async let statusBar = checked("defaults read com.apple.finder ShowStatusBar 2>/dev/null || echo false")
-        async let dockHide = checked("defaults read com.apple.dock autohide 2>/dev/null || echo false")
-        async let ssType = checked("defaults read com.apple.screencapture type 2>/dev/null || echo png")
-        async let autoDownload = checked("defaults read /Library/Preferences/com.apple.SoftwareUpdate AutomaticDownload 2>/dev/null || echo 0")
-        async let loginItemsRaw = checked("osascript -e 'tell application \"System Events\" to get the name of every login item' 2>/dev/null || echo ''")
-
-        let osLines = await macOS.split(whereSeparator: \.isNewline).map(String.init)
-        let os = osLines.count >= 2 ? "\(osLines[0]) \(osLines[1])" : await macOS
-        let hw = await hardware
+        """),
+            ("fileVault", "fdesetup status 2>/dev/null | sed 's/FileVault is //'"),
+            ("firewall", "/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null | sed 's/Firewall is //'"),
+            ("gatekeeper", "spctl --status 2>/dev/null"),
+            ("sip", "csrutil status 2>/dev/null | sed 's/System Integrity Protection status: //'"),
+            ("spotlight", "mdutil -s / 2>/dev/null | tail -1 | sed 's/^ *//'"),
+            ("ip", "ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 'No detectada'"),
+            ("dns", "scutil --dns | awk '/nameserver\\[[0-9]+\\]/ {print $3}' | sort -u | tr '\\n' ', ' | sed 's/, $//'"),
+            ("router", "route -n get default 2>/dev/null | awk '/gateway/ {print $2; exit}'"),
+            ("userAgents", "find \"$HOME/Library/LaunchAgents\" -maxdepth 1 -name '*.plist' 2>/dev/null | wc -l | tr -d ' '"),
+            ("sysAgents", "find /Library/LaunchAgents -maxdepth 1 -name '*.plist' 2>/dev/null | wc -l | tr -d ' '"),
+            ("daemons", "find /Library/LaunchDaemons -maxdepth 1 -name '*.plist' 2>/dev/null | wc -l | tr -d ' '"),
+            ("autoDownload", "defaults read /Library/Preferences/com.apple.SoftwareUpdate AutomaticDownload 2>/dev/null || echo 0"),
+            ("loginItemsRaw", "osascript -e 'tell application \"System Events\" to get the name of every login item' 2>/dev/null || echo ''")
+        ]
+        // Mantener como máximo seis shells activos por captura.
+        let readings = await withTaskGroup(of: (String, String).self) { group in
+            var pending = commands.makeIterator()
+            for _ in 0..<6 {
+                if let (key, command) = pending.next() {
+                    group.addTask { (key, await checked(command)) }
+                }
+            }
+            var values: [String: String] = [:]
+            while let (key, value) = await group.next() {
+                values[key] = value
+                if let (key, command) = pending.next() {
+                    group.addTask { (key, await checked(command)) }
+                }
+            }
+            return values
+        }
+        let macOS = readings["macOS", default: ""]
+        let hardware = readings["hardware", default: ""]
+        let disk = readings["disk", default: ""]
+        let diskPercent = readings["diskPercent", default: ""]
+        let battery = readings["battery", default: ""]
+        let fileVault = readings["fileVault", default: ""]
+        let firewall = readings["firewall", default: ""]
+        let gatekeeper = readings["gatekeeper", default: ""]
+        let sip = readings["sip", default: ""]
+        let spotlight = readings["spotlight", default: ""]
+        let ip = readings["ip", default: ""]
+        let dns = readings["dns", default: ""]
+        let router = readings["router", default: ""]
+        let userAgents = readings["userAgents", default: ""]
+        let sysAgents = readings["sysAgents", default: ""]
+        let daemons = readings["daemons", default: ""]
+        let autoDownload = readings["autoDownload", default: ""]
+        let loginItemsRaw = readings["loginItemsRaw", default: ""]
+        let osLines = macOS.split(whereSeparator: \.isNewline).map(String.init)
+        let os = osLines.count >= 2 ? "\(osLines[0]) \(osLines[1])" : macOS
+        let hw = hardware
         let memory = mem
-        let diskUsed = Int(await diskPercent) ?? 0
-        let batteryText = await battery
+        let diskUsed = Int(diskPercent) ?? 0
+        let batteryText = battery
         let batteryOK = !batteryText.lowercased().contains("service")
-        let ua = Int(await userAgents) ?? 0
-        let sa = Int(await sysAgents) ?? 0
-        let sd = Int(await daemons) ?? 0
-        let loginRaw = await loginItemsRaw
+        let ua = Int(userAgents) ?? 0
+        let sa = Int(sysAgents) ?? 0
+        let sd = Int(daemons) ?? 0
+        let loginRaw = loginItemsRaw
         let loginItemsValue: String = {
             let t = loginRaw.trimmingCharacters(in: .whitespacesAndNewlines)
             return t.isEmpty ? "—" : t
@@ -561,36 +605,95 @@ private struct SystemSnapshot {
             macOS: os,
             hardware: memory.isEmpty ? hw : "\(hw), \(memory)",
             uptime: uptime,
-            diskFree: await disk,
+            diskFree: disk,
             diskLooksOK: diskUsed < 85,
             battery: batteryText,
             batteryLooksOK: batteryOK,
-            fileVault: await fileVault,
-            firewall: await firewall,
-            gatekeeper: await gatekeeper,
-            sip: await sip,
-            autoUpdate: (Int(await autoDownload) ?? 0) > 0,
-            userCachesSize: await userCaches,
-            userLogsSize: await userLogs,
-            derivedDataSize: await derived,
-            brewCacheSize: await brewCache,
-            trashSize: await trash,
-            spotlightStatus: await spotlight,
-            localIP: await ip,
-            dnsServers: await dns,
-            router: await router,
+            fileVault: fileVault,
+            firewall: firewall,
+            gatekeeper: gatekeeper,
+            sip: sip,
+            autoUpdate: (Int(autoDownload) ?? 0) > 0,
+            userCachesSize: "…",
+            userLogsSize: "…",
+            derivedDataSize: "…",
+            brewCacheSize: "…",
+            trashSize: "…",
+            spotlightStatus: spotlight,
+            localIP: ip,
+            dnsServers: dns,
+            router: router,
             userLaunchAgentsCount: ua,
             systemLaunchAgentsCount: sa,
             systemLaunchDaemonsCount: sd,
             launchAgentsSummary: "\(ua + sa + sd) items",
             loginItems: loginItemsValue,
-            showHiddenFiles: bool(await hidden),
-            showExtensions: bool(await ext),
-            showPathBar: bool(await pathBar),
-            showStatusBar: bool(await statusBar),
-            dockAutohide: bool(await dockHide),
-            screenshotType: await ssType
+            showHiddenFiles: bool(preferenceValue(.showHiddenFiles) ?? "false"),
+            showExtensions: bool(preferenceValue(.showExtensions) ?? "false"),
+            showPathBar: bool(preferenceValue(.showPathBar) ?? "false"),
+            showStatusBar: bool(preferenceValue(.showStatusBar) ?? "false"),
+            dockAutohide: bool(preferenceValue(.dockAutohide) ?? "false"),
+            screenshotType: preferenceValue(.screenshotType) ?? "png"
         )
+    }
+
+    enum Preference: Sendable {
+        case showHiddenFiles, showExtensions, showPathBar, showStatusBar, dockAutohide, screenshotType
+    }
+
+    static func preferenceLocation(_ preference: Preference) -> (domain: String, key: String) {
+        switch preference {
+        case .showHiddenFiles: ("com.apple.finder", "AppleShowAllFiles")
+        case .showExtensions: ("NSGlobalDomain", "AppleShowAllExtensions")
+        case .showPathBar: ("com.apple.finder", "ShowPathbar")
+        case .showStatusBar: ("com.apple.finder", "ShowStatusBar")
+        case .dockAutohide: ("com.apple.dock", "autohide")
+        case .screenshotType: ("com.apple.screencapture", "type")
+        }
+    }
+
+    private static func preferenceValue(_ preference: Preference) -> String? {
+        let location = preferenceLocation(preference)
+        let domain = location.domain == "NSGlobalDomain" ? kCFPreferencesAnyApplication : location.domain as CFString
+        // Invalidar la caché para reflejar los cambios realizados por defaults.
+        CFPreferencesAppSynchronize(domain)
+        guard let value = CFPreferencesCopyAppValue(location.key as CFString, domain) else { return nil }
+        return String(describing: value)
+    }
+
+    struct Sizes: Sendable {
+        var userCaches: String = "…"
+        var userLogs: String = "…"
+        var derivedData: String = "…"
+        var brewCache: String = "…"
+        var trash: String = "…"
+    }
+
+    var sizes: Sizes {
+        get {
+            Sizes(userCaches: userCachesSize, userLogs: userLogsSize, derivedData: derivedDataSize,
+                  brewCache: brewCacheSize, trash: trashSize)
+        }
+        set {
+            userCachesSize = newValue.userCaches
+            userLogsSize = newValue.userLogs
+            derivedDataSize = newValue.derivedData
+            brewCacheSize = newValue.brewCache
+            trashSize = newValue.trash
+        }
+    }
+
+    static func captureSizes() async -> Sizes {
+        await Task.detached(priority: .utility) {
+            // Los recorridos del disco se ejecutan en serie, fuera de la captura rápida.
+            var sizes = Sizes()
+            sizes.userCaches = await size("$HOME/Library/Caches")
+            sizes.userLogs = await size("$HOME/Library/Logs")
+            sizes.derivedData = await size("$HOME/Library/Developer/Xcode/DerivedData")
+            sizes.brewCache = await checked("if command -v brew >/dev/null; then du -sh \"$(brew --cache)\" 2>/dev/null | awk '{print $1}'; else echo '-'; fi")
+            sizes.trash = await size("$HOME/.Trash")
+            return sizes
+        }.value
     }
 
     private static func checked(_ command: String) async -> String {
