@@ -105,6 +105,31 @@ struct CycleCountTests {
 
 @Suite("Parsers de stats del sistema")
 struct StatsParsersTests {
+    @Test("CPU por delta de ticks incluye nice en user")
+    func cpuFromTicks() throws {
+        let cpu = try #require(StatsParsers.cpuUsage(
+            fromTicks: (user: 130, sys: 220, idle: 340, nice: 20),
+            previous: (user: 100, sys: 200, idle: 300, nice: 10)))
+        #expect(cpu.user == 40)
+        #expect(cpu.sys == 20)
+        #expect(cpu.idle == 40)
+    }
+
+    @Test("CPU sin avance de ticks devuelve nil")
+    func cpuTicksUnchanged() {
+        #expect(StatsParsers.cpuUsage(fromTicks: (100, 200, 300, 10),
+                                     previous: (100, 200, 300, 10)) == nil)
+    }
+
+    @Test("CPU con delta completamente idle")
+    func cpuTicksIdle() throws {
+        let cpu = try #require(StatsParsers.cpuUsage(fromTicks: (100, 200, 400, 10),
+                                                    previous: (100, 200, 300, 10)))
+        #expect(cpu.user == 0)
+        #expect(cpu.sys == 0)
+        #expect(cpu.idle == 100)
+    }
+
     @Test("Tabla de procesos: orden, rutas con espacios y límite")
     func processTable() {
         let raw = """
@@ -313,5 +338,47 @@ struct ShellRunnerTests {
         } catch {
             #expect((error as NSError).code == 7)
         }
+    }
+}
+
+@Suite("Caché de métricas compartidas")
+struct SystemMetricsCacheTests {
+    @Test("Comparte captura en vuelo y reutiliza hasta vencer maxAge")
+    @MainActor func sharedCapture() async {
+        let cache = SystemMetricsCollector.MetricCache<Int>()
+        var captures = 0
+        var releaseCapture: CheckedContinuation<Void, Never>?
+        let capture: @MainActor () async -> Int = {
+            captures += 1
+            if captures == 1 {
+                await withCheckedContinuation { releaseCapture = $0 }
+            }
+            return captures
+        }
+        let first = Task { await cache.value(maxAge: 60, capture: capture) }
+        while releaseCapture == nil { await Task.yield() }
+        var secondStarted = false
+        let second = Task {
+            secondStarted = true
+            return await cache.value(maxAge: 0, capture: capture)
+        }
+        while !secondStarted { await Task.yield() }
+        releaseCapture?.resume()
+        let values = await (first.value, second.value)
+        #expect(values.0 == 1)
+        #expect(values.1 == 1)
+        #expect(await cache.value(maxAge: 60, capture: capture) == 1)
+        #expect(await cache.value(maxAge: 0, capture: capture) == 2)
+        #expect(captures == 2)
+    }
+
+    @Test("También cachea lecturas opcionales no disponibles")
+    @MainActor func missingValue() async {
+        let cache = SystemMetricsCollector.MetricCache<Int?>()
+        var captures = 0
+        let capture: @MainActor () async -> Int? = { captures += 1; return nil }
+        #expect(await cache.value(maxAge: 60, capture: capture) == nil)
+        #expect(await cache.value(maxAge: 60, capture: capture) == nil)
+        #expect(captures == 1)
     }
 }

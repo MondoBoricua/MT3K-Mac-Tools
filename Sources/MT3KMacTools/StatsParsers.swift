@@ -4,6 +4,18 @@ import Foundation
 /// Parsers puros extraídos para poder testearlos sin ejecutar comandos reales.
 /// Compartidos entre StatsState (Stats pane) y MenuBarBridge (popover).
 enum StatsParsers {
+    typealias CPUTicks = (user: UInt32, sys: UInt32, idle: UInt32, nice: UInt32)
+
+    /// Los contadores Mach son UInt32; la resta modular tolera su desbordamiento.
+    static func cpuUsage(fromTicks ticks: CPUTicks, previous: CPUTicks) -> (user: Double, sys: Double, idle: Double)? {
+        let user = Double(ticks.user &- previous.user) + Double(ticks.nice &- previous.nice)
+        let sys = Double(ticks.sys &- previous.sys)
+        let idle = Double(ticks.idle &- previous.idle)
+        let total = user + sys + idle
+        guard total > 0 else { return nil }
+        return (user: user / total * 100, sys: sys / total * 100, idle: idle / total * 100)
+    }
+
     static func formatUptime(_ seconds: TimeInterval) -> String {
         let totalMinutes = max(0, Int(seconds / 60))
         let days = totalMinutes / 1440
@@ -14,7 +26,7 @@ enum StatsParsers {
         return "\(minutes)m"
     }
 
-    struct ProcessTable {
+    struct ProcessTable: Sendable {
         let count: Int
         let topCPU: [ProcessSample]
         let topRAM: [ProcessSample]

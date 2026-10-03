@@ -169,38 +169,37 @@ final class MenuBarBridge: ObservableObject {
         caffeinatePID = MT3KCaffeinate.activePID()
         caffeinateMode = MT3KCaffeinate.mode
 
-        let ram = await captureRAM()
+        let ram = await SystemMetricsCollector.shared.ram(maxAge: pollInterval)
         ramUsedGB = ram.used
         ramTotalGB = ram.total
         ramAppGB = ram.app
         ramWiredGB = ram.wired
         ramCompressedGB = ram.compressed
         ramFreeGB = ram.free
-        let swap = await captureSwap()
+        let swap = await SystemMetricsCollector.shared.swap(maxAge: pollInterval)
         swapUsedGB = swap.used
         swapTotalGB = swap.total
-        let disk = await captureDisk()
+        let disk = await SystemMetricsCollector.shared.disk(maxAge: pollInterval)
         diskFreeGB = disk.free
         diskTotalGB = disk.total
         diskUsedPercent = disk.usedPercent
-        let cpu = await captureCPU()
+        let cpu = await SystemMetricsCollector.shared.cpu(maxAge: pollInterval)
         cpuUser = cpu.user
         cpuSys = cpu.sys
         cpuIdle = cpu.idle
         cpuTotal = min(100, cpu.user + cpu.sys)
-        let load = await captureLoad()
+        let load = await SystemMetricsCollector.shared.load(maxAge: pollInterval)
         loadAvg1 = load.l1
         loadAvg5 = load.l5
         loadAvg15 = load.l15
-        uptime = await captureUptime()
-        let processes = StatsParsers.processTable(
-            fromPS: await run("/bin/ps", ["-A", "-o", "pid=,%cpu=,rss=,comm="]), limit: 7)
+        uptime = await SystemMetricsCollector.shared.uptime()
+        let processes = await SystemMetricsCollector.shared.processes(limit: 7, maxAge: pollInterval)
         processCount = processes.count
-        batteryCycles = StatsParsers.cycleCount(fromIoreg: await run("/usr/sbin/ioreg", ["-rn", "AppleSmartBattery"]))
+        batteryCycles = await SystemMetricsCollector.shared.batteryCycles(maxAge: pollInterval)
         scheduleBrewOutdatedCheck()
         topCPU = processes.topCPU
         topRAM = processes.topRAM
-        if let gpu = await GPUUsageReader.read() {
+        if let gpu = await SystemMetricsCollector.shared.gpu(maxAge: pollInterval) {
             gpuUsagePercent = gpu.devicePercent
             gpuRendererPercent = gpu.rendererPercent
             gpuTilerPercent = gpu.tilerPercent
@@ -241,7 +240,7 @@ final class MenuBarBridge: ObservableObject {
                 gpuTempC = .nan
                 cpuTempMax = .nan
             }
-            let cpu = await captureCPU()
+            let cpu = await SystemMetricsCollector.shared.cpu(maxAge: pollInterval)
             cpuUser = cpu.user
             cpuSys = cpu.sys
             cpuIdle = cpu.idle
@@ -250,7 +249,7 @@ final class MenuBarBridge: ObservableObject {
         }
 
         if active.contains(.ram) {
-            let ram = await captureRAM()
+            let ram = await SystemMetricsCollector.shared.ram(maxAge: pollInterval)
             ramUsedGB = ram.used
             ramTotalGB = ram.total
             ramAppGB = ram.app
@@ -261,7 +260,7 @@ final class MenuBarBridge: ObservableObject {
         }
 
         if active.contains(.disk) {
-            let disk = await captureDisk()
+            let disk = await SystemMetricsCollector.shared.disk(maxAge: pollInterval)
             diskFreeGB = disk.free
             diskTotalGB = disk.total
             diskUsedPercent = disk.usedPercent
@@ -269,7 +268,7 @@ final class MenuBarBridge: ObservableObject {
         }
 
         if active.contains(.gpu) {
-            if let gpu = await GPUUsageReader.read() {
+            if let gpu = await SystemMetricsCollector.shared.gpu(maxAge: pollInterval) {
                 gpuUsagePercent = gpu.devicePercent
                 gpuRendererPercent = gpu.rendererPercent
                 gpuTilerPercent = gpu.tilerPercent
@@ -291,20 +290,19 @@ final class MenuBarBridge: ObservableObject {
         defer { finishRefresh() }
         await refreshCompactMetrics(metrics: [metric])
         if metric == .ram {
-            let swap = await captureSwap()
+            let swap = await SystemMetricsCollector.shared.swap(maxAge: pollInterval)
             swapUsedGB = swap.used
             swapTotalGB = swap.total
         }
         if metric == .cpu {
-            let load = await captureLoad()
+            let load = await SystemMetricsCollector.shared.load(maxAge: pollInterval)
             loadAvg1 = load.l1
             loadAvg5 = load.l5
             loadAvg15 = load.l15
-            uptime = await captureUptime()
+            uptime = await SystemMetricsCollector.shared.uptime()
         }
         if metric != .gpu {
-            let processes = StatsParsers.processTable(
-                fromPS: await run("/bin/ps", ["-A", "-o", "pid=,%cpu=,rss=,comm="]), limit: 7)
+            let processes = await SystemMetricsCollector.shared.processes(limit: 7, maxAge: pollInterval)
             if metric == .cpu { topCPU = processes.topCPU }
             else { topRAM = processes.topRAM }
         }
@@ -337,17 +335,6 @@ final class MenuBarBridge: ObservableObject {
         }
     }
 
-    private struct RAMSnapshot {
-        let used: Double
-        let total: Double
-        let app: Double
-        let wired: Double
-        let compressed: Double
-        let free: Double
-    }
-    private struct CPUSnapshot { let user: Double; let sys: Double; let idle: Double }
-    private struct SwapSnapshot { let used: Double; let total: Double }
-    private struct LoadSnapshot { let l1: Double; let l5: Double; let l15: Double }
     enum PollMode { case compact, full }
 
     private var activeCompactMetrics: Set<CompactMenuMetric> {
@@ -358,46 +345,6 @@ final class MenuBarBridge: ObservableObject {
         if defaults.bool(forKey: "menuMetricGPUEnabled") { active.insert(.gpu) }
         if defaults.bool(forKey: "menuMetricRAMEnabled") { active.insert(.ram) }
         return active
-    }
-
-    private func captureCPU() async -> CPUSnapshot {
-        let out = await run("/usr/bin/top", ["-l", "1", "-n", "0"])
-        if let cpu = StatsParsers.cpuUsage(fromTop: out) {
-            return CPUSnapshot(user: cpu.user, sys: cpu.sys, idle: cpu.idle)
-        }
-        return CPUSnapshot(user: 0, sys: 0, idle: 100)
-    }
-
-    private func captureRAM() async -> RAMSnapshot {
-        async let vmStat = run("/usr/bin/vm_stat", [])
-        let total = SystemInfo.physicalMemoryGB
-        let memory = StatsParsers.memory(fromVMStat: await vmStat)
-        return RAMSnapshot(
-            used: memory.usedGB,
-            total: total,
-            app: memory.appGB,
-            wired: memory.wiredGB,
-            compressed: memory.compressedGB,
-            free: max(0, total - memory.usedGB)
-        )
-    }
-
-    private func captureSwap() async -> SwapSnapshot {
-        guard let swap = SystemInfo.swapUsage else { return SwapSnapshot(used: 0, total: 0) }
-        return SwapSnapshot(used: swap.usedGB, total: swap.totalGB)
-    }
-
-    private struct DiskSnapshot { let free: Double; let total: Double; let usedPercent: Double }
-    private func captureDisk() async -> DiskSnapshot {
-        let dataPath = FileManager.default.fileExists(atPath: "/System/Volumes/Data") ? "/System/Volumes/Data" : "/"
-        let out = await run("/bin/df", ["-k", dataPath])
-        guard let disk = StatsParsers.disk(fromDF: out) else { return DiskSnapshot(free: 0, total: 0, usedPercent: 0) }
-        return DiskSnapshot(free: disk.freeGB, total: disk.totalGB, usedPercent: disk.usedPercent)
-    }
-
-    private func captureLoad() async -> LoadSnapshot {
-        guard let load = SystemInfo.loadAverages else { return LoadSnapshot(l1: 0, l5: 0, l15: 0) }
-        return LoadSnapshot(l1: load.l1, l5: load.l5, l15: load.l15)
     }
 
     // brew outdated tarda segundos — corre aparte del refresh para que el
@@ -426,11 +373,6 @@ final class MenuBarBridge: ObservableObject {
         }
     }
 
-    private func captureUptime() async -> String {
-        guard let boot = SystemInfo.bootTime else { return "" }
-        return StatsParsers.formatUptime(Date().timeIntervalSince(boot))
-    }
-
     private func appendHistory(_ value: Double, to history: inout [Double]) {
         guard !value.isNaN else { return }
         history.append(max(0, min(100, value)))
@@ -441,11 +383,6 @@ final class MenuBarBridge: ObservableObject {
 
     private func checked(_ command: String) async -> String {
         (try? await runShell(executable: "/bin/zsh", args: ["-lc", "\(command) || true"]))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    }
-
-    private func run(_ executable: String, _ args: [String]) async -> String {
-        (try? await runShell(executable: executable, args: args))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
