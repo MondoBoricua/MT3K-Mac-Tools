@@ -302,6 +302,104 @@ struct BatteryReadingParserTests {
     }
 }
 
+@Suite("Configuración del daemon de Battery Guard")
+struct BatteryGuardConfigTests {
+    @Test("El daemon posee el límite con config y control moderno")
+    func daemonOwnsModernLimit() {
+        #expect(BatteryGuardState.daemonOwnsLimit(config: (true, 80, 75), hasModernControl: true))
+    }
+
+    @Test("Solo BCLM conserva la evaluación de la app cada 30 s")
+    func bclmKeepsAppLoop() {
+        let autonomous = BatteryGuardState.daemonOwnsLimit(config: (true, 80, 75), hasModernControl: false)
+        #expect(!autonomous)
+        let plan = BatteryGuardState.loopPlan(guardEnabled: true, daemonAutonomous: autonomous)
+        #expect(plan.evaluate)
+        #expect(plan.interval == 30)
+    }
+
+    @Test("Sin config el daemon no posee el límite")
+    func missingConfigKeepsAppOwnership() {
+        #expect(!BatteryGuardState.daemonOwnsLimit(config: nil, hasModernControl: true))
+    }
+
+    @Test("Config actual con top-up")
+    func parseCurrentConfig() throws {
+        let config = try #require(BatteryGuardState.parseConfig("enabled=true limit=80 resume=75 topUp=false"))
+        #expect(config.enabled)
+        #expect(config.limit == 80)
+        #expect(config.resume == 75)
+    }
+
+    @Test("Config antigua sin top-up")
+    func parseOldConfig() throws {
+        let config = try #require(BatteryGuardState.parseConfig("enabled=false limit=90 resume=85"))
+        #expect(!config.enabled)
+        #expect(config.limit == 90)
+        #expect(config.resume == 85)
+    }
+
+    @Test("Rechaza config inválida", arguments: [
+        "", "basura", "enabled=true limit=80", "enabled=yes limit=80 resume=75",
+        "enabled=true limit=abc resume=75", "enabled=true limit=80 resume=abc",
+        "enabled=true enabled=false limit=80 resume=75"
+    ])
+    func parseInvalidConfig(raw: String) {
+        #expect(BatteryGuardState.parseConfig(raw) == nil)
+    }
+
+    @Test("Solo sincroniza config conocida cuando la app está activa")
+    func configSyncDecision() {
+        let cases: [(app: Bool, daemon: (enabled: Bool, limit: Int, resume: Int)?, expected: Bool)] = [
+            (true, (true, 80, 75), false),
+            (true, (false, 80, 75), true),
+            (true, (true, 90, 75), true),
+            (true, (true, 80, 70), true),
+            (true, (false, 90, 70), true),
+            (true, nil, false),
+            (false, (true, 90, 70), false),
+            (false, (false, 80, 75), false),
+            (false, nil, false)
+        ]
+        for (index, scenario) in cases.enumerated() {
+            #expect(BatteryGuardState.configSyncNeeded(
+                appEnabled: scenario.app, appLimit: 80, appResume: 75, daemon: scenario.daemon
+            ) == scenario.expected, "Caso \(index + 1)")
+        }
+    }
+}
+
+@Suite("Plan del loop de Battery Guard")
+struct BatteryGuardLoopPlanTests {
+    @Test("Daemon autónomo con guard activo")
+    func autonomousEnabled() {
+        let plan = BatteryGuardState.loopPlan(guardEnabled: true, daemonAutonomous: true)
+        #expect(!plan.evaluate)
+        #expect(plan.interval == 60)
+    }
+
+    @Test("Daemon autónomo con guard inactivo")
+    func autonomousDisabled() {
+        let plan = BatteryGuardState.loopPlan(guardEnabled: false, daemonAutonomous: true)
+        #expect(!plan.evaluate)
+        #expect(plan.interval == 60)
+    }
+
+    @Test("Daemon legacy con guard activo")
+    func legacyEnabled() {
+        let plan = BatteryGuardState.loopPlan(guardEnabled: true, daemonAutonomous: false)
+        #expect(plan.evaluate)
+        #expect(plan.interval == 30)
+    }
+
+    @Test("Daemon legacy con guard inactivo")
+    func legacyDisabled() {
+        let plan = BatteryGuardState.loopPlan(guardEnabled: false, daemonAutonomous: false)
+        #expect(!plan.evaluate)
+        #expect(plan.interval == 30)
+    }
+}
+
 @Suite("Lecturas nativas del sistema")
 struct SystemInfoTests {
     @Test func physicalMemory() {
