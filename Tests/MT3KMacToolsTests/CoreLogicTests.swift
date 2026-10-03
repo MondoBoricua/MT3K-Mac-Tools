@@ -2,6 +2,26 @@ import Testing
 import Foundation
 @testable import MT3KMacTools
 
+@Suite("Dominios de preferencias del sistema")
+struct SystemPreferenceTests {
+    @Test("Cada ajuste consulta su dominio y clave correspondientes")
+    func preferenceLocations() {
+        let expected: [(SystemSnapshot.Preference, String, String)] = [
+            (.showHiddenFiles, "com.apple.finder", "AppleShowAllFiles"),
+            (.showExtensions, "NSGlobalDomain", "AppleShowAllExtensions"),
+            (.showPathBar, "com.apple.finder", "ShowPathbar"),
+            (.showStatusBar, "com.apple.finder", "ShowStatusBar"),
+            (.dockAutohide, "com.apple.dock", "autohide"),
+            (.screenshotType, "com.apple.screencapture", "type")
+        ]
+        for (preference, domain, key) in expected {
+            let location = SystemSnapshot.preferenceLocation(preference)
+            #expect(location.domain == domain)
+            #expect(location.key == key)
+        }
+    }
+}
+
 // MARK: - OllamaState.isCloudModel
 
 @Suite("Detección de modelos Ollama Cloud")
