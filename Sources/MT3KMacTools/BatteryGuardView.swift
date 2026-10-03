@@ -40,6 +40,8 @@ final class BatteryGuardState: ObservableObject {
     @Published var helperAvailable = false
     @Published var daemonInstalled = false
     @Published var daemonReachable = false
+    @Published var daemonAutonomous = false
+    @Published var daemonConfig: (enabled: Bool, limit: Int, resume: Int)?
     @Published var topUpActive = false
     @Published var output = ""
 
@@ -73,15 +75,18 @@ final class BatteryGuardState: ObservableObject {
         async let battery = readBattery()
         async let smcProbe = readProbe()
         reading = await battery
-        probe = await smcProbe
+        let probeResult = await smcProbe
+        probe = probeResult.probe
         helperAvailable = helperURL != nil
         daemonInstalled = FileManager.default.isExecutableFile(atPath: daemonPath)
-        daemonReachable = await pingDaemon()
-        if daemonReachable {
-            // Un daemon viejo responde config get sin topUp → contains() da false. OK.
-            let config = (try? await runDaemonCommand(args: ["config", "get"])) ?? ""
+        daemonReachable = probeResult.viaDaemon
+        if daemonReachable, let config = try? await runDaemonCommand(args: ["config", "get"]) {
+            daemonConfig = Self.parseConfig(config)
+            daemonAutonomous = Self.daemonOwnsLimit(config: daemonConfig, hasModernControl: probe.hasModernControl)
             topUpActive = config.contains("topUp=true")
         } else {
+            daemonConfig = nil
+            daemonAutonomous = false
             topUpActive = false
         }
         if !reading.hasBattery {
@@ -96,6 +101,15 @@ final class BatteryGuardState: ObservableObject {
             status = "Control legacy Intel disponible vía BCLM."
         } else {
             status = "Este Mac no expone llaves SMC compatibles para control nativo."
+        }
+    }
+
+    func syncDaemonConfig(enabled: Bool, limit: Int, resume: Int) async {
+        do {
+            output = try await runDaemonCommand(args: ["config", "set", enabled ? "1" : "0", "\(limit)", "\(resume)"])
+            await refresh()
+        } catch {
+            status = "No se pudo sincronizar Battery Guard: \(error.localizedDescription)"
         }
     }
 
@@ -167,6 +181,11 @@ final class BatteryGuardState: ObservableObject {
 
     @discardableResult
     func evaluateGuard(limit: Int, resumeBelow: Int, reason: String) async -> Bool {
+        if reason == "background" {
+            // Detectar arranque, recuperación o actualización del daemon antes de decidir.
+            await refresh()
+            if daemonAutonomous { return true }
+        }
         guard reading.hasBattery, helperAvailable else { return false }
         guard daemonReachable else {
             status = "Battery Guard activo, pero el helper permanente no responde."
@@ -176,7 +195,9 @@ final class BatteryGuardState: ObservableObject {
         busy = true
         defer { busy = false }
 
-        await refresh()
+        if reason != "background" {
+            await refresh()
+        }
 
         do {
             if probe.hasModernControl {
@@ -247,21 +268,49 @@ final class BatteryGuardState: ObservableObject {
         }
     }
 
-    private func readProbe() async -> BatterySMCProbe {
-        if let raw = try? await runDaemonCommand(args: ["probe"]) {
-            return parseProbe(raw)
+    nonisolated static func parseConfig(_ raw: String) -> (enabled: Bool, limit: Int, resume: Int)? {
+        var fields: [String: String] = [:]
+        for token in raw.split(whereSeparator: { $0.isWhitespace }) {
+            let pair = token.split(separator: "=", omittingEmptySubsequences: false)
+            guard pair.count == 2, !pair[0].isEmpty, !pair[1].isEmpty,
+                  fields[String(pair[0])] == nil else { return nil }
+            fields[String(pair[0])] = String(pair[1])
         }
-        guard let helperURL else { return BatterySMCProbe() }
-        do {
-            let raw = try await runShell(executable: helperURL.path, args: ["probe"])
-            return parseProbe(raw)
-        } catch {
-            return BatterySMCProbe()
-        }
+        guard let enabledRaw = fields["enabled"], let enabled = Bool(enabledRaw),
+              let limitRaw = fields["limit"], let limit = Int(limitRaw),
+              let resumeRaw = fields["resume"], let resume = Int(resumeRaw) else { return nil }
+        return (enabled, limit, resume)
     }
 
-    private func pingDaemon() async -> Bool {
-        (try? await runDaemonCommand(args: ["probe"])) != nil
+    nonisolated static func daemonOwnsLimit(
+        config: (enabled: Bool, limit: Int, resume: Int)?, hasModernControl: Bool
+    ) -> Bool {
+        config != nil && hasModernControl
+    }
+
+    nonisolated static func configSyncNeeded(
+        appEnabled: Bool, appLimit: Int, appResume: Int,
+        daemon: (enabled: Bool, limit: Int, resume: Int)?
+    ) -> Bool {
+        guard appEnabled, let daemon else { return false }
+        return !daemon.enabled || daemon.limit != appLimit || daemon.resume != appResume
+    }
+
+    nonisolated static func loopPlan(guardEnabled: Bool, daemonAutonomous: Bool) -> (evaluate: Bool, interval: Int) {
+        (evaluate: guardEnabled && !daemonAutonomous, interval: daemonAutonomous ? 60 : 30)
+    }
+
+    private func readProbe() async -> (probe: BatterySMCProbe, viaDaemon: Bool) {
+        if let raw = try? await runDaemonCommand(args: ["probe"]) {
+            return (parseProbe(raw), true)
+        }
+        guard let helperURL else { return (BatterySMCProbe(), false) }
+        do {
+            let raw = try await runShell(executable: helperURL.path, args: ["probe"])
+            return (parseProbe(raw), false)
+        } catch {
+            return (BatterySMCProbe(), false)
+        }
     }
 
     private func runDaemonCommand(args: [String]) async throws -> String {
@@ -454,6 +503,7 @@ struct BatteryGuardView: View {
     @AppStorage("batteryGuardResumeBelow") private var resumeBelow = 75.0
     @State private var suppressNextStop = false
     @State private var showAdvancedActions = false
+    @State private var configSyncTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
@@ -487,6 +537,22 @@ struct BatteryGuardView: View {
                     await state.stopGuard()
                 }
             }
+        }
+        .onChange(of: limit) {
+            scheduleDaemonConfigSync()
+        }
+        .onChange(of: resumeBelow) {
+            scheduleDaemonConfigSync()
+        }
+    }
+
+    private func scheduleDaemonConfigSync() {
+        configSyncTask?.cancel()
+        configSyncTask = Task {
+            // Ambos sliders comparten la espera para enviar solo el último ajuste.
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled, guardEnabled, state.daemonAutonomous else { return }
+            await state.syncDaemonConfig(enabled: true, limit: Int(limit), resume: Int(resumeBelow))
         }
     }
 

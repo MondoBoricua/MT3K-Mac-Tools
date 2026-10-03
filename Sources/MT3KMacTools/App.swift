@@ -173,15 +173,46 @@ struct MT3KMacToolsApp: App {
 
     private func runBatteryGuardLoop() async {
         while !Task.isCancelled {
-            await batteryGuardState.refresh()
-            if batteryGuardEnabled {
+            // Daemon autónomo: refrescar y sincronizar cada 60 s; legacy: evaluar cada 30 s.
+            let plan = BatteryGuardState.loopPlan(
+                guardEnabled: batteryGuardEnabled,
+                daemonAutonomous: batteryGuardState.daemonAutonomous
+            )
+            if plan.evaluate {
                 _ = await batteryGuardState.evaluateGuard(
                     limit: Int(batteryGuardLimit),
                     resumeBelow: Int(batteryGuardResumeBelow),
                     reason: "background"
                 )
+            } else {
+                await batteryGuardState.refresh()
             }
-            try? await Task.sleep(for: .seconds(30))
+            // También cubre el daemon detectado durante la evaluación de background.
+            if batteryGuardState.daemonAutonomous {
+                if BatteryGuardState.configSyncNeeded(
+                    appEnabled: batteryGuardEnabled,
+                    appLimit: Int(batteryGuardLimit),
+                    appResume: Int(batteryGuardResumeBelow),
+                    daemon: batteryGuardState.daemonConfig
+                ) {
+                    await batteryGuardState.syncDaemonConfig(
+                        enabled: true, limit: Int(batteryGuardLimit), resume: Int(batteryGuardResumeBelow)
+                    )
+                }
+                if let config = batteryGuardState.daemonConfig {
+                    if !batteryGuardEnabled && config.enabled {
+                        batteryGuardState.status = "Guard desactivado en esta app, pero activo en el daemon; se conserva su configuración."
+                    }
+                    let activity = config.enabled ? "Daemon aplica el límite" : "Daemon inactivo"
+                    let reading = batteryGuardState.reading
+                    batteryGuardState.lastAction = "\(activity): \(reading.percent)% · \(reading.chargingState)."
+                }
+            }
+            let nextPlan = BatteryGuardState.loopPlan(
+                guardEnabled: batteryGuardEnabled,
+                daemonAutonomous: batteryGuardState.daemonAutonomous
+            )
+            try? await Task.sleep(for: .seconds(nextPlan.interval))
         }
     }
 
