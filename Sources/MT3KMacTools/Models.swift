@@ -73,103 +73,42 @@ final class BrewState: ObservableObject {
     }
 
     private nonisolated func detect(_ command: String) async -> String {
-        await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let candidates = [
-                    "/opt/homebrew/bin/\(command)",
-                    "/usr/local/bin/\(command)",
-                    "/usr/bin/\(command)"
-                ]
-                for p in candidates where FileManager.default.isExecutableFile(atPath: p) {
-                    cont.resume(returning: p); return
-                }
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                proc.arguments = ["-l", "-c", "command -v \(command) 2>/dev/null || true"]
-                let pipe = Pipe()
-                proc.standardOutput = pipe
-                proc.standardError = Pipe()
-                do {
-                    try proc.run()
-                    proc.waitUntilExit()
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let out = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    cont.resume(returning: FileManager.default.isExecutableFile(atPath: out) ? out : "")
-                } catch {
-                    cont.resume(returning: "")
-                }
-            }
+        let candidates = ["/opt/homebrew/bin/\(command)", "/usr/local/bin/\(command)", "/usr/bin/\(command)"]
+        if let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return path
         }
+        let out = (try? await runShell(executable: "/bin/zsh",
+            args: ["-l", "-c", "command -v \(command) 2>/dev/null || true"]))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return FileManager.default.isExecutableFile(atPath: out) ? out : ""
     }
 
     private nonisolated func detectOutdated(brewPath: String) async -> Set<String> {
-        await withCheckedContinuation { (cont: CheckedContinuation<Set<String>, Never>) in
-            DispatchQueue.global(qos: .utility).async {
-                guard !brewPath.isEmpty else {
-                    cont.resume(returning: [])
-                    return
-                }
-
-                let command = """
-                HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 "\(brewPath)" outdated --formula --quiet 2>/dev/null || true
-                HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 "\(brewPath)" outdated --cask --greedy --quiet 2>/dev/null || true
-                """
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                proc.arguments = ["-lc", command]
-                let pipe = Pipe()
-                proc.standardOutput = pipe
-                proc.standardError = Pipe()
-                do {
-                    try proc.run()
-                    proc.waitUntilExit()
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: data, encoding: .utf8) ?? ""
-                    let names = output
-                        .split(whereSeparator: \.isNewline)
-                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                        .filter { !$0.isEmpty }
-                    cont.resume(returning: Set(names))
-                } catch {
-                    cont.resume(returning: [])
-                }
-            }
-        }
+        guard !brewPath.isEmpty else { return [] }
+        let command = """
+        HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 "\(brewPath)" outdated --formula --quiet 2>/dev/null || true
+        HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 "\(brewPath)" outdated --cask --greedy --quiet 2>/dev/null || true
+        """
+        let output = (try? await runShell(executable: "/bin/zsh", args: ["-lc", command])) ?? ""
+        let names = output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Set(names)
     }
 
     private nonisolated func detectInstalled(brewPath: String) async -> Set<String> {
-        await withCheckedContinuation { (cont: CheckedContinuation<Set<String>, Never>) in
-            DispatchQueue.global(qos: .utility).async {
-                guard !brewPath.isEmpty else {
-                    cont.resume(returning: [])
-                    return
-                }
-
-                let command = """
-                HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 "\(brewPath)" list --formula --quiet 2>/dev/null || true
-                HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 "\(brewPath)" list --cask --quiet 2>/dev/null || true
-                """
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                proc.arguments = ["-lc", command]
-                let pipe = Pipe()
-                proc.standardOutput = pipe
-                proc.standardError = Pipe()
-                do {
-                    try proc.run()
-                    proc.waitUntilExit()
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: data, encoding: .utf8) ?? ""
-                    let names = output
-                        .split(whereSeparator: \.isNewline)
-                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                        .filter { !$0.isEmpty }
-                    cont.resume(returning: Set(names))
-                } catch {
-                    cont.resume(returning: [])
-                }
-            }
-        }
+        guard !brewPath.isEmpty else { return [] }
+        let command = """
+        HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 "\(brewPath)" list --formula --quiet 2>/dev/null || true
+        HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 "\(brewPath)" list --cask --quiet 2>/dev/null || true
+        """
+        let output = (try? await runShell(executable: "/bin/zsh", args: ["-lc", command])) ?? ""
+        let names = output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Set(names)
     }
 }
 
@@ -295,4 +234,8 @@ final class AdminAuth: ObservableObject {
 
     // No deinit: macOS reclaims the AuthorizationRef on process exit.
     // Call release() explicitly to invalidate the session early.
+}
+
+extension Notification.Name {
+    static let mt3kBrewStateChanged = Notification.Name("mt3kBrewStateChanged")
 }

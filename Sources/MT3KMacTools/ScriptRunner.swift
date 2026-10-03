@@ -38,7 +38,7 @@ func resolveScript(_ name: String) throws -> URL {
     return url
 }
 
-func runShell(executable: String, args: [String]) async throws -> String {
+func runShell(executable: String, args: [String], extraEnv: [String: String] = [:]) async throws -> String {
     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
         DispatchQueue.global(qos: .userInitiated).async {
             let proc = Process()
@@ -48,6 +48,7 @@ func runShell(executable: String, args: [String]) async throws -> String {
             var env = ProcessInfo.processInfo.environment
             let extra = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
             env["PATH"] = "\(env["PATH"] ?? ""):\(extra)"
+            env.merge(extraEnv) { _, new in new }
             proc.environment = env
 
             let pipe = Pipe()

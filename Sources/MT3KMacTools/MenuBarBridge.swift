@@ -1,6 +1,7 @@
 // Menu bar — MenuBarBridge: polling y captura de métricas para popovers y medidores.
 import SwiftUI
 import AppKit
+import Combine
 
 @MainActor
 final class MenuBarBridge: ObservableObject {
@@ -46,17 +47,39 @@ final class MenuBarBridge: ObservableObject {
     @Published var gpuTempC: Double = .nan
     @Published var cpuTempMax: Double = .nan
 
+    private var refreshInFlight = false
+    private var fullPollingActive = false
+    private var initialFullRefreshPending = false
+    private var compactInterval: TimeInterval = 15
     private var pollTimer: Timer?
     private var pollInterval: TimeInterval = 60
     private var pollMode: PollMode = .full
     private let maxHistorySamples = 48
     private var brewCheckTask: Task<Void, Never>?
+    private var brewOutdatedCheckedAt: Date?
+    private let brewOutdatedTTL: TimeInterval = 15 * 60
+    private var brewCheckInvalidated = false
+    private var brewObserver: AnyCancellable?
+
+    init() {
+        brewObserver = NotificationCenter.default.publisher(for: .mt3kBrewStateChanged)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.brewOutdatedCheckedAt = nil
+                    self.brewCheckInvalidated = true
+                    self.scheduleBrewOutdatedCheck()
+                }
+            }
+    }
 
     func startPolling(interval: TimeInterval = 60) {
         startPolling(interval: interval, mode: .full)
     }
 
     func startCompactPolling(interval: TimeInterval = 15) {
+        compactInterval = interval
+        guard !fullPollingActive else { return }
         startPolling(interval: interval, mode: .compact)
     }
 
@@ -66,19 +89,62 @@ final class MenuBarBridge: ObservableObject {
     }
 
     private func startPolling(interval: TimeInterval, mode: PollMode) {
-        if pollTimer != nil, pollInterval <= interval { return }
+        if mode == .full {
+            fullPollingActive = true
+        } else {
+            guard !activeCompactMetrics.isEmpty else { return }
+            if pollTimer != nil, pollMode == .compact, pollInterval == interval { return }
+        }
         pollInterval = interval
         pollMode = mode
-        Task { await refresh(mode: mode) }
+        Task {
+            guard pollTimer != nil, pollMode == mode else { return }
+            if mode == .full, refreshInFlight {
+                initialFullRefreshPending = true
+            } else {
+                await refresh(mode: mode)
+            }
+        }
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                await self?.refresh(mode: mode)
+                guard let self, self.pollTimer != nil, self.pollMode == mode else { return }
+                await self.refresh(mode: mode)
+            }
+        }
+    }
+
+    func stopFullPolling() {
+        fullPollingActive = false
+        initialFullRefreshPending = false
+        pollTimer?.invalidate()
+        pollTimer = nil
+        if !activeCompactMetrics.isEmpty {
+            startPolling(interval: compactInterval, mode: .compact)
+        }
+    }
+
+    func stopCompactPollingIfUnused() {
+        guard !fullPollingActive, activeCompactMetrics.isEmpty else { return }
+        pollTimer?.invalidate()
+        pollTimer = nil
+    }
+
+    private func finishRefresh() {
+        refreshInFlight = false
+        if initialFullRefreshPending, fullPollingActive {
+            initialFullRefreshPending = false
+            Task {
+                guard fullPollingActive else { return }
+                await refresh(mode: .full)
             }
         }
     }
 
     func refresh(mode: PollMode = .full) async {
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        defer { finishRefresh() }
         if mode == .compact {
             await refreshCompactMetrics()
             return
@@ -127,11 +193,13 @@ final class MenuBarBridge: ObservableObject {
         loadAvg5 = load.l5
         loadAvg15 = load.l15
         uptime = await captureUptime()
-        processCount = await captureProcessCount()
+        let processes = StatsParsers.processTable(
+            fromPS: await run("/bin/ps", ["-A", "-o", "pid=,%cpu=,rss=,comm="]), limit: 7)
+        processCount = processes.count
         batteryCycles = StatsParsers.cycleCount(fromIoreg: await run("/usr/sbin/ioreg", ["-rn", "AppleSmartBattery"]))
         scheduleBrewOutdatedCheck()
-        topCPU = await captureTopProcesses(by: .cpu)
-        topRAM = await captureTopProcesses(by: .memory)
+        topCPU = processes.topCPU
+        topRAM = processes.topRAM
         if let gpu = await GPUUsageReader.read() {
             gpuUsagePercent = gpu.devicePercent
             gpuRendererPercent = gpu.rendererPercent
@@ -150,8 +218,8 @@ final class MenuBarBridge: ObservableObject {
         lastUpdate = Date()
     }
 
-    private func refreshCompactMetrics() async {
-        let active = activeCompactMetrics
+    private func refreshCompactMetrics(metrics: Set<CompactMenuMetric>? = nil) async {
+        let active = metrics ?? activeCompactMetrics
         refreshCaffeineStatus()
 
         if active.isEmpty {
@@ -217,6 +285,31 @@ final class MenuBarBridge: ObservableObject {
         lastUpdate = Date()
     }
 
+    func refreshMetric(_ metric: CompactMenuMetric) async {
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        defer { finishRefresh() }
+        await refreshCompactMetrics(metrics: [metric])
+        if metric == .ram {
+            let swap = await captureSwap()
+            swapUsedGB = swap.used
+            swapTotalGB = swap.total
+        }
+        if metric == .cpu {
+            let load = await captureLoad()
+            loadAvg1 = load.l1
+            loadAvg5 = load.l5
+            loadAvg15 = load.l15
+            uptime = await captureUptime()
+        }
+        if metric != .gpu {
+            let processes = StatsParsers.processTable(
+                fromPS: await run("/bin/ps", ["-A", "-o", "pid=,%cpu=,rss=,comm="]), limit: 7)
+            if metric == .cpu { topCPU = processes.topCPU }
+            else { topRAM = processes.topRAM }
+        }
+    }
+
     func toggleCaffeine() async {
         if MT3KCaffeinate.activePID() != nil {
             _ = MT3KCaffeinate.stop()
@@ -255,7 +348,6 @@ final class MenuBarBridge: ObservableObject {
     private struct CPUSnapshot { let user: Double; let sys: Double; let idle: Double }
     private struct SwapSnapshot { let used: Double; let total: Double }
     private struct LoadSnapshot { let l1: Double; let l5: Double; let l15: Double }
-    private enum ProcessSortKey { case cpu, memory }
     enum PollMode { case compact, full }
 
     private var activeCompactMetrics: Set<CompactMenuMetric> {
@@ -277,9 +369,8 @@ final class MenuBarBridge: ObservableObject {
     }
 
     private func captureRAM() async -> RAMSnapshot {
-        async let totalRaw = run("/usr/sbin/sysctl", ["-n", "hw.memsize"])
         async let vmStat = run("/usr/bin/vm_stat", [])
-        let total = (Double((await totalRaw).trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) / 1_073_741_824.0
+        let total = SystemInfo.physicalMemoryGB
         let memory = StatsParsers.memory(fromVMStat: await vmStat)
         return RAMSnapshot(
             used: memory.usedGB,
@@ -292,9 +383,8 @@ final class MenuBarBridge: ObservableObject {
     }
 
     private func captureSwap() async -> SwapSnapshot {
-        let out = await run("/usr/sbin/sysctl", ["vm.swapusage"])
-        guard let swap = StatsParsers.swapGB(fromSysctl: out) else { return SwapSnapshot(used: 0, total: 0) }
-        return SwapSnapshot(used: swap.used, total: swap.total)
+        guard let swap = SystemInfo.swapUsage else { return SwapSnapshot(used: 0, total: 0) }
+        return SwapSnapshot(used: swap.usedGB, total: swap.totalGB)
     }
 
     private struct DiskSnapshot { let free: Double; let total: Double; let usedPercent: Double }
@@ -306,68 +396,39 @@ final class MenuBarBridge: ObservableObject {
     }
 
     private func captureLoad() async -> LoadSnapshot {
-        let out = await run("/usr/sbin/sysctl", ["-n", "vm.loadavg"])
-        guard let load = StatsParsers.loadAverages(fromSysctl: out) else { return LoadSnapshot(l1: 0, l5: 0, l15: 0) }
+        guard let load = SystemInfo.loadAverages else { return LoadSnapshot(l1: 0, l5: 0, l15: 0) }
         return LoadSnapshot(l1: load.l1, l5: load.l5, l15: load.l15)
-    }
-
-    private func captureProcessCount() async -> Int {
-        let out = await run("/bin/ps", ["-A", "-o", "pid="])
-        return max(0, out.split(whereSeparator: \.isNewline).count)
     }
 
     // brew outdated tarda segundos — corre aparte del refresh para que el
     // popover abra al instante y el badge aparezca cuando termine.
-    private func scheduleBrewOutdatedCheck() {
+    private func scheduleBrewOutdatedCheck(force: Bool = false) {
         guard brewCheckTask == nil else { return }
+        if !force, let checkedAt = brewOutdatedCheckedAt,
+           Date().timeIntervalSince(checkedAt) < brewOutdatedTTL { return }
+        brewCheckInvalidated = false
         brewCheckTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.brewCheckTask = nil }
+            defer {
+                self.brewCheckTask = nil
+                if self.brewCheckInvalidated { self.scheduleBrewOutdatedCheck() }
+            }
             let brew = "/opt/homebrew/bin/brew"
             guard FileManager.default.isExecutableFile(atPath: brew) else { return }
-            let formulae = await self.run(brew, ["outdated", "--quiet"])
-            let casks = await self.run(brew, ["outdated", "--cask", "--quiet"])
+            let env = ["HOMEBREW_NO_AUTO_UPDATE": "1", "HOMEBREW_NO_ENV_HINTS": "1"]
+            let formulae = (try? await runShell(executable: brew, args: ["outdated", "--quiet"], extraEnv: env)) ?? ""
+            let casks = (try? await runShell(executable: brew, args: ["outdated", "--cask", "--quiet"], extraEnv: env)) ?? ""
             guard !Task.isCancelled else { return }
+            guard !self.brewCheckInvalidated else { return }
+            self.brewOutdatedCheckedAt = Date()
             self.brewOutdatedCount = formulae.split(whereSeparator: \.isNewline).count
                 + casks.split(whereSeparator: \.isNewline).count
         }
     }
 
     private func captureUptime() async -> String {
-        let raw = await run("/usr/sbin/sysctl", ["-n", "kern.boottime"])
-        guard let match = raw.range(of: #"sec\s*=\s*([0-9]+)"#, options: .regularExpression) else { return "" }
-        let digits = raw[match].filter(\.isNumber)
-        guard let seconds = TimeInterval(digits) else { return "" }
-        return formatUptime(Date().timeIntervalSince(Date(timeIntervalSince1970: seconds)))
-    }
-
-    private func captureTopProcesses(by key: ProcessSortKey) async -> [ProcessSample] {
-        let sortFlag = key == .cpu ? "-r" : "-m"
-        let out = await run("/bin/ps", ["-A", sortFlag, "-o", "pid=,%cpu=,rss=,comm="])
-        var result: [ProcessSample] = []
-        for line in out.split(whereSeparator: \.isNewline) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
-            let parts = trimmed.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true).map(String.init)
-            guard parts.count >= 4,
-                  let _ = Int(parts[0]),
-                  let cpuPct = Double(parts[1]),
-                  let rssKB = Int(parts[2]) else { continue }
-            let pid = parts[0]
-            let name = (parts[3] as NSString).lastPathComponent
-            let raw: Double
-            let value: String
-            if key == .cpu {
-                raw = cpuPct
-                value = String(format: "%.1f%%", cpuPct)
-            } else {
-                raw = Double(rssKB) * 1024
-                value = formatBytes(raw)
-            }
-            result.append(ProcessSample(id: "\(pid)-\(name)", pid: pid, name: name, value: value, rawValue: raw))
-            if result.count >= 7 { break }
-        }
-        return result
+        guard let boot = SystemInfo.bootTime else { return "" }
+        return StatsParsers.formatUptime(Date().timeIntervalSince(boot))
     }
 
     private func appendHistory(_ value: Double, to history: inout [Double]) {
@@ -376,22 +437,6 @@ final class MenuBarBridge: ObservableObject {
         if history.count > maxHistorySamples {
             history.removeFirst(history.count - maxHistorySamples)
         }
-    }
-
-    private func formatUptime(_ seconds: TimeInterval) -> String {
-        let totalMinutes = max(0, Int(seconds / 60))
-        let days = totalMinutes / 1440
-        let hours = (totalMinutes % 1440) / 60
-        let minutes = totalMinutes % 60
-        if days > 0 { return "\(days)d \(hours)h" }
-        if hours > 0 { return "\(hours)h \(minutes)m" }
-        return "\(minutes)m"
-    }
-
-    private func formatBytes(_ bytes: Double) -> String {
-        let f = ByteCountFormatter()
-        f.countStyle = .file
-        return f.string(fromByteCount: Int64(bytes))
     }
 
     private func checked(_ command: String) async -> String {

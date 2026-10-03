@@ -76,7 +76,7 @@ final class FlowState: ObservableObject {
         refreshPermissions()
         refreshSecrets()
         loadHistory()
-        applyProvider(provider)
+        applyProvider(provider, preload: defaults.bool(forKey: "flowMenuBarEnabled"))
         setFlowActive(defaults.bool(forKey: "flowMenuBarEnabled"))
     }
 
@@ -152,6 +152,7 @@ final class FlowState: ObservableObject {
 
     func setFlowActive(_ active: Bool) {
         if active {
+            if activeProvider == .local { Task { await preloadLocalModel() } }
             registerCurrentHotkey()
         } else {
             hotkeyManager.deactivate()
@@ -558,14 +559,14 @@ final class FlowState: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    func applyProvider(_ provider: FlowProvider) {
+    func applyProvider(_ provider: FlowProvider, preload: Bool = true) {
         refreshSecrets()
         switch provider {
         case .local:
             status = "Provider local seleccionado."
             providerStatus = "Local: WhisperKit (CoreML) transcribe y gemma3:1b limpia el texto. 100% offline."
             localModelStatus = "Preparando modelo local \(localModelVariant)… (la primera vez descarga ~1.5 GB)"
-            Task { await preloadLocalModel() }
+            if preload { Task { await preloadLocalModel() } }
         case .groq:
             status = "Provider Groq seleccionado."
             providerStatus = "Groq usa transcripción cloud compatible OpenAI. No descarga modelo local."

@@ -506,13 +506,14 @@ private struct SystemSnapshot {
     static func capture() async -> SystemSnapshot {
         async let macOS = checked("sw_vers -productName; sw_vers -productVersion; sw_vers -buildVersion")
         async let hardware = checked("sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m")
-        async let mem = checked("sysctl -n hw.memsize | awk '{printf \"%.0f GB\", $1/1024/1024/1024}'")
-        async let uptime = checked("uptime | sed 's/^.*up //; s/, [0-9]* users.*//; s/, load averages.*//'")
+        let mem = String(format: "%.0f GB", SystemInfo.physicalMemoryGB)
+        let uptime = SystemInfo.bootTime.map { StatsParsers.formatUptime(Date().timeIntervalSince($0)) } ?? ""
         async let disk = checked("target='/System/Volumes/Data'; [ -d \"$target\" ] || target='/'; df -H \"$target\" | awk 'NR==2 {print $4 \" libres de \" $2 \" (\" $5 \" usado)\"}'")
         async let diskPercent = checked("target='/System/Volumes/Data'; [ -d \"$target\" ] || target='/'; df \"$target\" | awk 'NR==2 {gsub(\"%\", \"\", $5); print $5}'")
         async let battery = checked("""
-        cycles=$(system_profiler SPPowerDataType 2>/dev/null | awk -F': ' '/Cycle Count/ {print $2; exit}')
-        condition=$(system_profiler SPPowerDataType 2>/dev/null | awk -F': ' '/Condition/ {print $2; exit}')
+        powerInfo=$(system_profiler SPPowerDataType 2>/dev/null)
+        cycles=$(echo "$powerInfo" | awk -F': ' '/Cycle Count/ {print $2; exit}')
+        condition=$(echo "$powerInfo" | awk -F': ' '/Condition/ {print $2; exit}')
         if [ -n "$cycles" ]; then echo "${condition:-Unknown}, ${cycles} ciclos"; else echo "No aplica"; fi
         """)
         async let fileVault = checked("fdesetup status 2>/dev/null | sed 's/FileVault is //'")
@@ -543,7 +544,7 @@ private struct SystemSnapshot {
         let osLines = await macOS.split(whereSeparator: \.isNewline).map(String.init)
         let os = osLines.count >= 2 ? "\(osLines[0]) \(osLines[1])" : await macOS
         let hw = await hardware
-        let memory = await mem
+        let memory = mem
         let diskUsed = Int(await diskPercent) ?? 0
         let batteryText = await battery
         let batteryOK = !batteryText.lowercased().contains("service")
@@ -559,7 +560,7 @@ private struct SystemSnapshot {
         return SystemSnapshot(
             macOS: os,
             hardware: memory.isEmpty ? hw : "\(hw), \(memory)",
-            uptime: await uptime,
+            uptime: uptime,
             diskFree: await disk,
             diskLooksOK: diskUsed < 85,
             battery: batteryText,

@@ -67,6 +67,7 @@ final class StatsState: ObservableObject {
     @Published var refreshInterval: Double = 3.0
     @Published var lastUpdate: Date = .distantPast
 
+    private var refreshInFlight = false
     private var pollTimer: Timer?
 
     func start() {
@@ -95,9 +96,9 @@ final class StatsState: ObservableObject {
     }
 
     func refresh() async {
-        // Marcamos lastUpdate ANTES de cualquier await — así sabemos que refresh()
-        // se invocó aunque algún capture posterior tarde o falle.
-        self.lastUpdate = Date()
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        defer { refreshInFlight = false }
 
         var s = self.stats   // mantén el estado previo si algún capture falla
 
@@ -109,7 +110,6 @@ final class StatsState: ObservableObject {
         s.cpuSys = cpu.sys
         s.cpuIdle = cpu.idle
         s.cpuTotal = min(100, cpu.user + cpu.sys)
-        self.stats = s
 
         if let gpu = await GPUUsageReader.read() {
             s.gpuUsagePercent = gpu.devicePercent
@@ -122,14 +122,12 @@ final class StatsState: ObservableObject {
             s.gpuTilerPercent = .nan
             s.gpuMemoryGB = 0
         }
-        self.stats = s
 
         let ram = await captureRAM()
         s.ramUsedGB = ram.used
         s.ramTotalGB = ram.total
         s.memPressureLabel = ram.pressureLabel
         s.memPressureColor = ram.pressureColor
-        self.stats = s
 
         let swap = await captureSwap()
         s.swapUsedGB = swap.used
@@ -160,10 +158,12 @@ final class StatsState: ObservableObject {
         s.temperatureC = temperature.value.isEmpty ? "—" : temperature.value
         s.temperatureSource = temperature.source
 
-        s.processCount = await captureProcessCount()
+        let processes = StatsParsers.processTable(
+            fromPS: await run("/bin/ps", ["-A", "-o", "pid=,%cpu=,rss=,comm="]), limit: 5)
+        s.processCount = processes.count
         s.uptime = await captureUptime()
-        s.topCPU = await captureTopProcesses(by: .cpu)
-        s.topRAM = await captureTopProcesses(by: .memory)
+        s.topCPU = processes.topCPU
+        s.topRAM = processes.topRAM
 
         self.stats = s
         self.lastUpdate = Date()
@@ -184,30 +184,18 @@ final class StatsState: ObservableObject {
 
     private struct RAMVals { var used: Double; var total: Double; var pressureLabel: String; var pressureColor: String }
     private func captureRAM() async -> RAMVals {
-        async let totalRaw = run("/usr/sbin/sysctl", ["-n", "hw.memsize"])
         async let vmStat = run("/usr/bin/vm_stat", [])
-        let total = (Double((await totalRaw).trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) / 1_073_741_824.0
+        let total = SystemInfo.physicalMemoryGB
         let used = StatsParsers.memory(fromVMStat: await vmStat).usedGB
 
-        // memory_pressure (read-only)
-        let pressureRaw = await run("/usr/bin/memory_pressure", [])
-        var label = "Normal"
-        var color = "green"
-        if pressureRaw.lowercased().contains("critical") {
-            label = "Critical"; color = "red"
-        } else if pressureRaw.lowercased().contains("warn") {
-            label = "Warning"; color = "orange"
-        }
-        return RAMVals(used: used, total: total, pressureLabel: label, pressureColor: color)
+        let pressure = SystemInfo.memoryPressure
+        return RAMVals(used: used, total: total, pressureLabel: pressure.label, pressureColor: pressure.color)
     }
 
     private struct SwapVals { var used: Double; var total: Double }
     private func captureSwap() async -> SwapVals {
-        let out = await run("/usr/sbin/sysctl", ["vm.swapusage"])
-        guard let swap = StatsParsers.swapGB(fromSysctl: out) else {
-            return SwapVals(used: 0, total: 0)
-        }
-        return SwapVals(used: swap.used, total: swap.total)
+        guard let swap = SystemInfo.swapUsage else { return SwapVals(used: 0, total: 0) }
+        return SwapVals(used: swap.usedGB, total: swap.totalGB)
     }
 
     private struct DiskVals { var free: Double; var total: Double; var usedPercent: Double }
@@ -245,28 +233,14 @@ final class StatsState: ObservableObject {
 
     private struct LoadVals { var l1: Double; var l5: Double; var l15: Double }
     private func captureLoad() async -> LoadVals {
-        let out = await run("/usr/sbin/sysctl", ["-n", "vm.loadavg"])
-        guard let load = StatsParsers.loadAverages(fromSysctl: out) else {
-            return LoadVals(l1: 0, l5: 0, l15: 0)
-        }
+        guard let load = SystemInfo.loadAverages else { return LoadVals(l1: 0, l5: 0, l15: 0) }
         return LoadVals(l1: load.l1, l5: load.l5, l15: load.l15)
     }
 
     private struct ThermalVals { var state: Int; var label: String }
     private func captureThermal() async -> ThermalVals {
-        // 0=nominal, 1=fair, 2=serious, 3=critical, 4=destination
-        let sysctlOut = await run("/usr/sbin/sysctl", ["-n", "machdep.xcpm.cpu_thermal_level"])
-        let state = Int(sysctlOut.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-
-        let label: String
-        switch state {
-        case 0: label = "Nominal"
-        case 1: label = "Fair"
-        case 2: label = "Serious"
-        case 3: label = "Critical"
-        default: label = "Estado \(state)"
-        }
-        return ThermalVals(state: state, label: label)
+        let thermal = SystemInfo.thermalLevel
+        return ThermalVals(state: thermal.state, label: thermal.label)
     }
 
     /// Lee temperatura. Prefiere IOHID nativo (Apple Silicon, sin sudo).
@@ -299,54 +273,9 @@ final class StatsState: ObservableObject {
         MacTemperature.shared.read()
     }
 
-    private func captureProcessCount() async -> Int {
-        let out = await run("/bin/ps", ["-A", "-o", "pid="])
-        let lines = out.split(whereSeparator: \.isNewline).count
-        return max(0, lines)
-    }
-
     private func captureUptime() async -> String {
-        let raw = await run("/usr/sbin/sysctl", ["-n", "kern.boottime"])
-        guard let match = raw.range(of: #"sec\s*=\s*([0-9]+)"#, options: .regularExpression) else { return "" }
-        let digits = raw[match].filter(\.isNumber)
-        guard let seconds = TimeInterval(digits) else { return "" }
-        return formatUptime(Date().timeIntervalSince(Date(timeIntervalSince1970: seconds)))
-    }
-
-    private enum SortKey { case cpu, memory }
-    private func captureTopProcesses(by key: SortKey) async -> [ProcessSample] {
-        // Usamos ps en vez de top — top con -stats no parsea bien al haber tabla mezclada.
-        // Salida ps: PID %CPU %MEM RSS COMMAND
-        let sortFlag = key == .cpu ? "-r" : "-m"
-        let out = await run("/bin/ps", ["-A", sortFlag, "-o", "pid=,%cpu=,rss=,comm="])
-        var result: [ProcessSample] = []
-        var seen = 0
-        for line in out.split(whereSeparator: \.isNewline) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
-            // Tokens: PID %CPU RSS_KB COMMAND_RUTA
-            let parts = trimmed.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true).map(String.init)
-            guard parts.count >= 4,
-                  let _ = Int(parts[0]),
-                  let cpuPct = Double(parts[1]),
-                  let rssKB = Int(parts[2]) else { continue }
-            let pid = parts[0]
-            let fullPath = parts[3]
-            let name = (fullPath as NSString).lastPathComponent
-            let raw: Double
-            let displayValue: String
-            if key == .cpu {
-                raw = cpuPct
-                displayValue = String(format: "%.1f%%", cpuPct)
-            } else {
-                raw = Double(rssKB) * 1024
-                displayValue = formatBytes(raw)
-            }
-            result.append(ProcessSample(id: "\(pid)-\(name)", pid: pid, name: name, value: displayValue, rawValue: raw))
-            seen += 1
-            if seen >= 5 { break }
-        }
-        return result
+        guard let boot = SystemInfo.bootTime else { return "" }
+        return StatsParsers.formatUptime(Date().timeIntervalSince(boot))
     }
 
     private func parseMemSize(_ raw: String) -> Double {
@@ -363,12 +292,6 @@ final class StatsState: ObservableObject {
         }
     }
 
-    private func formatBytes(_ bytes: Double) -> String {
-        let f = ByteCountFormatter()
-        f.countStyle = .file
-        return f.string(fromByteCount: Int64(bytes))
-    }
-
     private func findExecutable(_ name: String) -> String? {
         let pathEntries = (ProcessInfo.processInfo.environment["PATH"] ?? "")
             .split(separator: ":")
@@ -376,21 +299,6 @@ final class StatsState: ObservableObject {
         let candidates = (pathEntries + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])
             .map { "\($0)/\(name)" }
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-    }
-
-    private func formatUptime(_ seconds: TimeInterval) -> String {
-        let totalMinutes = max(0, Int(seconds / 60))
-        let days = totalMinutes / 1440
-        let hours = (totalMinutes % 1440) / 60
-        let minutes = totalMinutes % 60
-
-        if days > 0 {
-            return "\(days)d \(hours)h"
-        }
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        }
-        return "\(minutes)m"
     }
 
     private func run(_ executable: String, _ args: [String]) async -> String {
