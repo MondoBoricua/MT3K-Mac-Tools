@@ -4,7 +4,7 @@ import AppKit
 
 // MARK: - Models
 
-struct ProcessSample: Identifiable, Hashable {
+struct ProcessSample: Identifiable, Hashable, Sendable {
     let id: String
     let pid: String
     let name: String
@@ -102,16 +102,15 @@ final class StatsState: ObservableObject {
 
         var s = self.stats   // mantén el estado previo si algún capture falla
 
-        // Capturas secuenciales (rápidas — todas <50ms en zsh -lc). Si una falla,
-        // las siguientes siguen ejecutándose porque cada función ya devuelve
-        // valores por defecto en caso de error.
-        let cpu = await captureCPU()
+        // El collector comparte las capturas recientes con el menú.
+        // Cada métrica conserva sus valores por defecto en caso de error.
+        let cpu = await SystemMetricsCollector.shared.cpu(maxAge: refreshInterval)
         s.cpuUser = cpu.user
         s.cpuSys = cpu.sys
         s.cpuIdle = cpu.idle
         s.cpuTotal = min(100, cpu.user + cpu.sys)
 
-        if let gpu = await GPUUsageReader.read() {
+        if let gpu = await SystemMetricsCollector.shared.gpu(maxAge: refreshInterval) {
             s.gpuUsagePercent = gpu.devicePercent
             s.gpuRendererPercent = gpu.rendererPercent
             s.gpuTilerPercent = gpu.tilerPercent
@@ -123,17 +122,18 @@ final class StatsState: ObservableObject {
             s.gpuMemoryGB = 0
         }
 
-        let ram = await captureRAM()
+        let ram = await SystemMetricsCollector.shared.ram(maxAge: refreshInterval)
         s.ramUsedGB = ram.used
         s.ramTotalGB = ram.total
-        s.memPressureLabel = ram.pressureLabel
-        s.memPressureColor = ram.pressureColor
+        let pressure = SystemInfo.memoryPressure
+        s.memPressureLabel = pressure.label
+        s.memPressureColor = pressure.color
 
-        let swap = await captureSwap()
+        let swap = await SystemMetricsCollector.shared.swap(maxAge: refreshInterval)
         s.swapUsedGB = swap.used
         s.swapTotalGB = swap.total
 
-        let disk = await captureDisk()
+        let disk = await SystemMetricsCollector.shared.disk(maxAge: refreshInterval)
         s.diskFreeGB = disk.free
         s.diskTotalGB = disk.total
         s.diskUsedPercent = disk.usedPercent
@@ -144,7 +144,7 @@ final class StatsState: ObservableObject {
         s.batteryCycles = bat.cycles
         s.batteryCondition = bat.condition
 
-        let load = await captureLoad()
+        let load = await SystemMetricsCollector.shared.load(maxAge: refreshInterval)
         s.loadAvg1 = load.l1
         s.loadAvg5 = load.l5
         s.loadAvg15 = load.l15
@@ -158,10 +158,9 @@ final class StatsState: ObservableObject {
         s.temperatureC = temperature.value.isEmpty ? "—" : temperature.value
         s.temperatureSource = temperature.source
 
-        let processes = StatsParsers.processTable(
-            fromPS: await run("/bin/ps", ["-A", "-o", "pid=,%cpu=,rss=,comm="]), limit: 5)
+        let processes = await SystemMetricsCollector.shared.processes(limit: 5, maxAge: refreshInterval)
         s.processCount = processes.count
-        s.uptime = await captureUptime()
+        s.uptime = await SystemMetricsCollector.shared.uptime()
         s.topCPU = processes.topCPU
         s.topRAM = processes.topRAM
 
@@ -170,45 +169,6 @@ final class StatsState: ObservableObject {
     }
 
     // MARK: - Captura individual
-
-    private struct CPUVals { var user: Double; var sys: Double; var idle: Double }
-    private func captureCPU() async -> CPUVals {
-        // top -l 1 -n 0 sin pipes (el grep|head fallaba dentro del Process).
-        // Parseamos la línea "CPU usage: X% user, Y% sys, Z% idle" en Swift.
-        let out = await run("/usr/bin/top", ["-l", "1", "-n", "0"])
-        guard let cpu = StatsParsers.cpuUsage(fromTop: out) else {
-            return CPUVals(user: 0, sys: 0, idle: 100)
-        }
-        return CPUVals(user: cpu.user, sys: cpu.sys, idle: cpu.idle)
-    }
-
-    private struct RAMVals { var used: Double; var total: Double; var pressureLabel: String; var pressureColor: String }
-    private func captureRAM() async -> RAMVals {
-        async let vmStat = run("/usr/bin/vm_stat", [])
-        let total = SystemInfo.physicalMemoryGB
-        let used = StatsParsers.memory(fromVMStat: await vmStat).usedGB
-
-        let pressure = SystemInfo.memoryPressure
-        return RAMVals(used: used, total: total, pressureLabel: pressure.label, pressureColor: pressure.color)
-    }
-
-    private struct SwapVals { var used: Double; var total: Double }
-    private func captureSwap() async -> SwapVals {
-        guard let swap = SystemInfo.swapUsage else { return SwapVals(used: 0, total: 0) }
-        return SwapVals(used: swap.usedGB, total: swap.totalGB)
-    }
-
-    private struct DiskVals { var free: Double; var total: Double; var usedPercent: Double }
-    private func captureDisk() async -> DiskVals {
-        // On modern APFS macOS, "/" is the sealed system snapshot and reports
-        // only the OS volume usage. User data lives on /System/Volumes/Data.
-        let dataPath = FileManager.default.fileExists(atPath: "/System/Volumes/Data") ? "/System/Volumes/Data" : "/"
-        let out = await run("/bin/df", ["-k", dataPath])
-        guard let disk = StatsParsers.disk(fromDF: out) else {
-            return DiskVals(free: 0, total: 0, usedPercent: 0)
-        }
-        return DiskVals(free: disk.freeGB, total: disk.totalGB, usedPercent: disk.usedPercent)
-    }
 
     private struct BatteryVals { var percent: Int; var charging: Bool; var cycles: Int; var condition: String }
     private func captureBattery() async -> BatteryVals {
@@ -224,17 +184,8 @@ final class StatsState: ObservableObject {
         if out.contains("discharging") {
             charging = false
         }
-        // Cycles + condition cambian lentamente; los capturamos cada vez (es barato vía SPPowerDataType pero
-        // toma ~1s. Vamos al ioreg que es instantáneo):
-        let info = await run("/usr/sbin/ioreg", ["-rn", "AppleSmartBattery"])
-        let cycles = StatsParsers.cycleCount(fromIoreg: info)
+        let cycles = await SystemMetricsCollector.shared.batteryCycles(maxAge: refreshInterval)
         return BatteryVals(percent: percent, charging: charging, cycles: cycles, condition: "")
-    }
-
-    private struct LoadVals { var l1: Double; var l5: Double; var l15: Double }
-    private func captureLoad() async -> LoadVals {
-        guard let load = SystemInfo.loadAverages else { return LoadVals(l1: 0, l5: 0, l15: 0) }
-        return LoadVals(l1: load.l1, l5: load.l5, l15: load.l15)
     }
 
     private struct ThermalVals { var state: Int; var label: String }
@@ -271,11 +222,6 @@ final class StatsState: ObservableObject {
     /// Lectura completa (no string, valores numéricos) — usada por el menu bar.
     func detailedTemperature() -> TemperatureReading? {
         MacTemperature.shared.read()
-    }
-
-    private func captureUptime() async -> String {
-        guard let boot = SystemInfo.bootTime else { return "" }
-        return StatsParsers.formatUptime(Date().timeIntervalSince(boot))
     }
 
     private func parseMemSize(_ raw: String) -> Double {
