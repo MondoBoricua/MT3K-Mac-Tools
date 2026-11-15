@@ -330,8 +330,7 @@ struct InstallRow: View {
     }
 
     private var appExists: Bool {
-        guard let appName = item.appName else { return false }
-        return FileManager.default.fileExists(atPath: "/Applications/\(appName)")
+        brew.appExists(item.appName)
     }
 
     private var isOutdated: Bool {

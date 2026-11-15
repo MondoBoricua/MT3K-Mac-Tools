@@ -77,7 +77,8 @@ struct AppsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            // Lazy: las 172 filas sólo se construyen al entrar en pantalla.
+            LazyVStack(alignment: .leading, spacing: 16) {
                 dashboard
                 preflight
                 presetsView
@@ -433,7 +434,7 @@ struct AppsView: View {
     }
 
     private func categorySection(title: String, symbol: String, items: [CatalogItem]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        LazyVStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: symbol).foregroundColor(Theme.accent)
                 Text(title).font(.headline)
@@ -566,8 +567,7 @@ struct AppsView: View {
     }
 
     private func appExists(_ item: CatalogItem) -> Bool {
-        guard let appName = item.appName else { return false }
-        return FileManager.default.fileExists(atPath: "/Applications/\(appName)")
+        brew.appExists(item.appName)
     }
 
     private func canInstall(_ item: CatalogItem) -> Bool {
