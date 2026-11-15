@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage("installBehavior") private var installBehavior = "ask"
+    @AppStorage(UpdateChecker.enabledKey) private var updateCheckEnabled = true
     @AppStorage("showAdvancedTools") private var showAdvancedTools = true
     @AppStorage("confirmSecurityTools") private var confirmSecurityTools = true
     @AppStorage("terminalTimeoutMinutes") private var terminalTimeoutMinutes = 6.0
@@ -21,6 +22,13 @@ struct SettingsView: View {
                 }
                 Toggle("Confirmar herramientas de ciberseguridad", isOn: $confirmSecurityTools)
                 Toggle("Mostrar herramientas avanzadas", isOn: $showAdvancedTools)
+            }
+
+            Section("Actualizaciones") {
+                Toggle("Avisar cuando haya una versión nueva", isOn: $updateCheckEnabled)
+                Text("Consulta el último release público una vez al día. No descarga ni instala nada.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Barra de menús") {

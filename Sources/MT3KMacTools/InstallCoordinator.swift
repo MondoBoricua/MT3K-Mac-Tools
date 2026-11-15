@@ -65,6 +65,13 @@ final class InstallCoordinator: ObservableObject {
                 log.append("\(item.name) ya existe; omitido en cola.", level: .info)
                 continue
             }
+            // CLIs (sin .app): si Homebrew ya lo tiene, no relanzar brew install.
+            if item.appName == nil, behavior != "force", item.install.brewPackageName != nil,
+               await isKnownBrewInstalled(item) {
+                statuses[item.id] = .success("Ya instalado vía Homebrew; omitido en cola")
+                log.append("\(item.name) ya está instalado vía Homebrew; omitido en cola.", level: .info)
+                continue
+            }
             if shouldAdoptIntoBrew {
                 log.append("\(item.name) existe en /Applications; instalando con --force para gestionarlo vía Brew.", level: .info)
             }
@@ -75,6 +82,9 @@ final class InstallCoordinator: ObservableObject {
         isRunningQueue = false
         log.append("Cola finalizada.", level: .success)
     }
+
+    /// Líneas de salida que se conservan para el diagnóstico de errores (la cola del log).
+    private static let maxRetainedLines = 200
 
     private func unique(_ items: [CatalogItem]) -> [CatalogItem] {
         var seen = Set<String>()
@@ -135,6 +145,9 @@ final class InstallCoordinator: ObservableObject {
             var phase = ""
             for try await line in stream {
                 allLines.append(line.text)
+                if allLines.count > Self.maxRetainedLines * 2 {
+                    allLines.removeFirst(allLines.count - Self.maxRetainedLines)
+                }
                 if let nextPhase = detectPhase(line.text) {
                     phase = nextPhase
                 }
@@ -200,6 +213,9 @@ final class InstallCoordinator: ObservableObject {
             var phase = "Actualizando"
             for try await line in stream {
                 allLines.append(line.text)
+                if allLines.count > Self.maxRetainedLines * 2 {
+                    allLines.removeFirst(allLines.count - Self.maxRetainedLines)
+                }
                 if let nextPhase = detectPhase(line.text) {
                     phase = nextPhase
                 }
