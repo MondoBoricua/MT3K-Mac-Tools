@@ -85,7 +85,7 @@ struct ContentView: View {
                     .foregroundStyle(Theme.gradient)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("MT3K Mac Tools").font(.headline)
-                    Text("v1.0").font(.caption2).foregroundColor(Theme.textSecondary)
+                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")").font(.caption2).foregroundColor(Theme.textSecondary)
                 }
             }
         }
