@@ -267,6 +267,7 @@ struct AppsView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(installer.isRunningQueue)
+                    .help(preset.items.map(\.name).joined(separator: ", "))
                 }
             }
         }

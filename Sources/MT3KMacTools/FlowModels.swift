@@ -18,6 +18,16 @@ enum FlowProvider: String, CaseIterable, Identifiable {
     static let groqDefaultModel = "whisper-large-v3"
     // gpt-4o-transcribe y whisper-1 se retiran del API el 2027-02-26; gpt-transcribe es el reemplazo.
     static let openAIDefaultModel = "gpt-transcribe"
+    // El endpoint /v1/audio/translations de OpenAI sólo acepta whisper-1 (spec oficial).
+    static let openAITranslationModel = "whisper-1"
+
+    /// Modelo que va en la petición cloud. Traducir con OpenAI usa otro endpoint que no
+    /// acepta los modelos de transcripción, así que ahí se fuerza el de traducción.
+    static func requestModel(provider: FlowProvider, translating: Bool, configured: String) -> String {
+        if provider == .openAI, translating { return openAITranslationModel }
+        if !configured.isEmpty { return configured }
+        return provider == .groq ? groqDefaultModel : openAIDefaultModel
+    }
 }
 
 enum FlowLanguage: String, CaseIterable, Identifiable {

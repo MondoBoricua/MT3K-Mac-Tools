@@ -451,7 +451,9 @@ final class FlowState: ObservableObject {
 
     private func multipartBody(boundary: String, audioData: Data) -> Data {
         var body = Data()
-        body.appendMultipartField("model", value: activeCloudModel.isEmpty ? defaultCloudModel : activeCloudModel, boundary: boundary)
+        let model = FlowProvider.requestModel(
+            provider: activeProvider, translating: activeLanguage == .translateEnglish, configured: activeCloudModel)
+        body.appendMultipartField("model", value: model, boundary: boundary)
         body.appendMultipartField("response_format", value: "json", boundary: boundary)
         body.appendMultipartField("temperature", value: "0", boundary: boundary)
         if activeLanguage == .spanish {
@@ -467,9 +469,6 @@ final class FlowState: ObservableObject {
         return body
     }
 
-    private var defaultCloudModel: String {
-        activeProvider == .groq ? FlowProvider.groqDefaultModel : FlowProvider.openAIDefaultModel
-    }
 
     private var pasteRestoreTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?

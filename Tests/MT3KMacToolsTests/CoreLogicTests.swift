@@ -518,3 +518,47 @@ struct SystemMetricsCacheTests {
         #expect(captures == 1)
     }
 }
+
+@Suite("Modelo de la petición cloud de Flow")
+struct FlowRequestModelTests {
+    @Test("Usa el modelo configurado, o el default del provider si está vacío")
+    func configuredOrDefault() {
+        #expect(FlowProvider.requestModel(provider: .groq, translating: false, configured: "") == FlowProvider.groqDefaultModel)
+        #expect(FlowProvider.requestModel(provider: .openAI, translating: false, configured: "") == FlowProvider.openAIDefaultModel)
+        #expect(FlowProvider.requestModel(provider: .openAI, translating: false, configured: "custom") == "custom")
+    }
+
+    @Test("Traducir con OpenAI fuerza el modelo de traducción; Groq conserva el suyo")
+    func translation() {
+        #expect(FlowProvider.requestModel(provider: .openAI, translating: true, configured: "gpt-transcribe") == "whisper-1")
+        #expect(FlowProvider.requestModel(provider: .groq, translating: true, configured: "whisper-large-v3") == "whisper-large-v3")
+    }
+}
+
+@Suite("Aviso de versión nueva")
+struct UpdateCheckerTests {
+    @Test("Comparación numérica por componentes")
+    func comparison() {
+        #expect(UpdateChecker.isNewer("v1.2", than: "1.1.1"))
+        #expect(UpdateChecker.isNewer("1.10", than: "1.9"))
+        #expect(UpdateChecker.isNewer("2.0", than: "1.99.9"))
+        #expect(!UpdateChecker.isNewer("v1.1.1", than: "1.1.1"))
+        #expect(!UpdateChecker.isNewer("1.1", than: "1.1.0"))
+        #expect(!UpdateChecker.isNewer("1.0", than: "1.1"))
+    }
+
+    @Test("Versiones no numéricas nunca cuentan como nuevas")
+    func invalid() {
+        #expect(!UpdateChecker.isNewer("nightly", than: "1.1"))
+        #expect(!UpdateChecker.isNewer("1.2-beta", than: "1.1"))
+        #expect(!UpdateChecker.isNewer("1.2", than: "dev"))
+        #expect(!UpdateChecker.isNewer("", than: "1.1"))
+    }
+
+    @Test("Lee tag_name del JSON del release")
+    func tagName() {
+        let json = Data(#"{"tag_name":"v1.2","name":"x","assets":[]}"#.utf8)
+        #expect(UpdateChecker.tagName(fromReleaseJSON: json) == "v1.2")
+        #expect(UpdateChecker.tagName(fromReleaseJSON: Data("{}".utf8)) == nil)
+    }
+}

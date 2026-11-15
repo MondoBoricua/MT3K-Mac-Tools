@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var log: LogStore
     @EnvironmentObject var brew: BrewState
+    @StateObject private var updates = UpdateChecker()
     @State private var selection: Pane = .browsers
 
     enum Pane: String, Hashable, CaseIterable, Identifiable {
@@ -68,6 +69,7 @@ struct ContentView: View {
                 }
             }
         }
+        .task { await updates.checkIfDue() }
         .task {
             await brew.refresh()
             log.append("MT3K Mac Tools listo.", level: .success)
@@ -87,6 +89,17 @@ struct ContentView: View {
                     Text("MT3K Mac Tools").font(.headline)
                     Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")").font(.caption2).foregroundColor(Theme.textSecondary)
                 }
+            }
+            if let version = updates.availableVersion {
+                Button {
+                    NSWorkspace.shared.open(UpdateChecker.downloadURL)
+                } label: {
+                    Label("v\(version) disponible", systemImage: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(Theme.amber)
+                }
+                .buttonStyle(.plain)
+                .help("Hay una versión más nueva. Abre la página de descarga.")
             }
         }
         .padding(.bottom, 8)

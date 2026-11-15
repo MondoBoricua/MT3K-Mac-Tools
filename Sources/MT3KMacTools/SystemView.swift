@@ -11,6 +11,7 @@ struct SystemView: View {
 
     @State private var snapshot = SystemSnapshot.empty
     @State private var isRefreshing = false
+    @State private var pendingCleanup: PendingCleanup?
     @State private var pendingRefresh = false
     @State private var pendingSizeRefresh = false
     @State private var showHiddenFiles = false
@@ -43,6 +44,16 @@ struct SystemView: View {
         .task {
             loginItem.refresh()
             await refresh()
+        }
+        .alert(item: $pendingCleanup) { cleanup in
+            Alert(
+                title: Text(cleanup.title),
+                message: Text(cleanup.detail),
+                primaryButton: .destructive(Text("Borrar")) {
+                    Task { await runAndRefresh(cleanup.startMessage, cleanup.command, refreshSizes: true) }
+                },
+                secondaryButton: .cancel(Text("Cancelar"))
+            )
         }
     }
 
@@ -186,16 +197,16 @@ struct SystemView: View {
             }
             actionRow {
                 SystemActionButton(title: "Limpiar caches", symbol: "sparkles", color: Theme.green) {
-                    Task { await runAndRefresh("Limpiando caches de usuario...", "rm -rf \"$HOME/Library/Caches\"/*", refreshSizes: true) }
+                    pendingCleanup = .init(title: "Limpiar caches de usuario", detail: "Borra el contenido de ~/Library/Caches (\(snapshot.userCachesSize)). Las apps lo regeneran, pero pueden tardar más al abrir.", startMessage: "Limpiando caches de usuario...", command: "rm -rf \"$HOME/Library/Caches\"/*")
                 }
                 SystemActionButton(title: "Limpiar Brew", symbol: "shippingbox.fill", color: Theme.green) {
-                    Task { await runAndRefresh("Limpiando cache de Homebrew...", "brew cleanup -s && rm -rf \"$(brew --cache)\"/*", refreshSizes: true) }
+                    pendingCleanup = .init(title: "Limpiar cache de Homebrew", detail: "Ejecuta brew cleanup y borra las descargas en caché (\(snapshot.brewCacheSize)).", startMessage: "Limpiando cache de Homebrew...", command: "brew cleanup -s && rm -rf \"$(brew --cache)\"/*")
                 }
                 SystemActionButton(title: "Limpiar DerivedData", symbol: "hammer.fill", color: Theme.amber) {
-                    Task { await runAndRefresh("Limpiando Xcode DerivedData...", "rm -rf \"$HOME/Library/Developer/Xcode/DerivedData\"/*", refreshSizes: true) }
+                    pendingCleanup = .init(title: "Limpiar Xcode DerivedData", detail: "Borra los productos de build de Xcode (\(snapshot.derivedDataSize)). El próximo build será completo.", startMessage: "Limpiando Xcode DerivedData...", command: "rm -rf \"$HOME/Library/Developer/Xcode/DerivedData\"/*")
                 }
                 SystemActionButton(title: "Vaciar Trash", symbol: "trash.fill", color: Theme.accent) {
-                    Task { await runAndRefresh("Vaciando Trash del usuario...", "rm -rf \"$HOME/.Trash\"/*", refreshSizes: true) }
+                    pendingCleanup = .init(title: "Vaciar Trash", detail: "Borra definitivamente lo que hay en la Papelera (\(snapshot.trashSize)). No se puede deshacer.", startMessage: "Vaciando Trash del usuario...", command: "rm -rf \"$HOME/.Trash\"/*")
                 }
             }
         }
@@ -332,7 +343,7 @@ struct SystemView: View {
         SystemPanel(title: "Maintenance Presets", symbol: "wand.and.stars") {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {
                 PresetButton(title: "Limpieza segura", detail: "Caches usuario, Brew cache, logs y Trash.", symbol: "sparkles", color: Theme.green) {
-                    Task { await safeCleanupPreset() }
+                    pendingCleanup = .init(title: "Limpieza segura", detail: "Borra caches de usuario (\(snapshot.userCachesSize)), logs (\(snapshot.userLogsSize)), Trash (\(snapshot.trashSize)), DerivedData (\(snapshot.derivedDataSize)) y ejecuta brew cleanup. No se puede deshacer.", startMessage: "Ejecutando limpieza segura...", command: Self.safeCleanupCommand)
                 }
                 PresetButton(title: "Reparar red", detail: "Flush DNS, ping test y refresco de estado.", symbol: "network", color: Theme.blue) {
                     openTerminalCommand("sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder; ping -c 4 1.1.1.1", title: "Repair Network")
@@ -411,14 +422,21 @@ struct SystemView: View {
         """)
     }
 
-    private func safeCleanupPreset() async {
-        await runAndRefresh("Ejecutando limpieza segura...", """
+    private static let safeCleanupCommand = """
         rm -rf "$HOME/Library/Caches"/*
         rm -rf "$HOME/Library/Logs"/*
         rm -rf "$HOME/.Trash"/*
         rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/*
         brew cleanup -s 2>/dev/null || true
-        """, refreshSizes: true)
+        """
+
+    /// Una limpieza pendiente de confirmar: nada se borra hasta que el usuario acepta.
+    struct PendingCleanup: Identifiable {
+        let id = UUID()
+        let title: String
+        let detail: String
+        let startMessage: String
+        let command: String
     }
 
     private func performancePreset() async {
