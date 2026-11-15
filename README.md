@@ -59,6 +59,7 @@ Requires macOS 14 or later on Apple Silicon. See the [changelog](CHANGELOG.md) f
   - `Open / EN /APPLICATIONS`
   - `Instalar / VIA BREW` when adopting an existing app into Brew
   - `Actualizar` when Brew reports an update
+- Searches the **whole Homebrew index** from the same search box, beyond the curated catalog.
 - Supports sequential install queues with multi-select checkboxes.
 - Includes setup presets like Developer base, AI coding, Security toolkit, and Creator.
 - Streams install logs live from Brew/npm/curl.
@@ -68,6 +69,7 @@ Requires macOS 14 or later on Apple Silicon. See the [changelog](CHANGELOG.md) f
 - **Battery Guard**: charge-limit control on Apple Silicon via a signed privileged helper that enforces the limit autonomously (SMC charge inhibit), even with the app closed.
 - **Displays / Power / Stats / Ollama** panes: multi-display brightness & gamma, power management, a live system stats dashboard, and a local Ollama model manager.
 - Menu bar suite: main popover with live CPU/GPU/RAM/disk/battery/Ollama status and quick toggles (Caffeine, Battery Guard), plus optional compact per-metric meters.
+- Asks before deleting anything in the storage cleaner, and tells you when a newer version is out.
 - Ships as a tiny native `.app` bundle, not a Chromium/webview monster.
 
 ## Highlights

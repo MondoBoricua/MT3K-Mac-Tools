@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2 — 2026-11-15
+
+### New
+- **Search all of Homebrew.** The catalog search also finds casks and formulae outside the curated list and installs them with the same queue, log and Terminal hand-off.
+- **New version notice.** The sidebar tells you when a newer release is out (one anonymous check per day; switch it off in Settings). The app never downloads or installs anything by itself.
+- **Confirm before deleting.** Cache, log, DerivedData and Trash cleanups show what will be freed and ask first.
+- Presets list their apps on hover.
+
+### Performance
+- The Apps pane no longer rebuilds its 172 rows and checks the disk for each one on every refresh: idle CPU with the pane open dropped from about 6 % to about 1.5 %.
+
+### Fixes
+- The install queue skips command-line tools Homebrew already has instead of running `brew install` again.
+- Flow: "Translate" with the OpenAI provider uses the model its translation endpoint accepts.
+- Install output kept in memory during long installs is capped.
+
+### Maintenance
+- `tools/audit_catalog.py` and a weekly workflow check that every catalog entry still exists and is not deprecated.
+
 ## 1.1.1 — 2026-11-15
 
 ### Fixes

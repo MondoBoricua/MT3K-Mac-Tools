@@ -1,0 +1,22 @@
+name: Catalog audit
+
+# Weekly check that every cask, formula, npm package and suggested Ollama tag
+# in the catalog still exists and is not deprecated. A failed run means the
+# catalog needs a refresh.
+on:
+  schedule:
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Update Homebrew metadata
+        run: brew update
+
+      - name: Audit catalog
+        run: python3 tools/audit_catalog.py

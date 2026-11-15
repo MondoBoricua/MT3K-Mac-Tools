@@ -75,3 +75,10 @@ Use the issue templates under `.github/ISSUE_TEMPLATE/`. Bug reports should
 include your macOS version, Mac architecture (Apple Silicon / Intel), and
 the app version. Feature requests should describe the problem you're
 solving, not just the solution.
+
+## Keeping the catalog current
+
+`python3 tools/audit_catalog.py` checks every cask, formula, npm package and
+suggested Ollama tag against Homebrew, npm and the Ollama registry, and that
+presets only reference existing ids. Run it before opening a catalog PR; a
+weekly workflow runs it on `main` as well.
