@@ -107,8 +107,6 @@ enum Catalog {
               symbol: "flame.fill", install: .brewCask("firefox"), category: .browsers, appName: "Firefox.app"),
         .init(id: "chrome", name: "Google Chrome", description: "Navegador de Google.",
               symbol: "globe.americas.fill", install: .brewCask("google-chrome"), category: .browsers, appName: "Google Chrome.app"),
-        .init(id: "arc", name: "Arc", description: "Navegador con sidebar y spaces de The Browser Company.",
-              symbol: "arrow.up.right.circle.fill", install: .brewCask("arc"), category: .browsers, appName: "Arc.app"),
         .init(id: "librewolf", name: "LibreWolf", description: "Fork de Firefox enfocado en privacidad.",
               symbol: "lock.shield.fill", install: .brewCask("librewolf"), category: .browsers, appName: "LibreWolf.app"),
         .init(id: "zen", name: "Zen Browser", description: "Fork de Firefox con UI moderna.",

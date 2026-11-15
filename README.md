@@ -44,12 +44,14 @@ Think **Chris Titus winutil**, but built for macOS, SwiftUI, Homebrew, and the w
 
 ## Download
 
-- **🚀 Ready-to-run app (signed):** patrons ($5+) on [**Patreon**](https://www.patreon.com/MT3K) get the pre-built, code-signed `.app` for every release — first, before the public release — and support development at the same time.
+- **🚀 Ready-to-run app (signed):** patrons ($5+) on [**Patreon**](https://www.patreon.com/MT3K) get the pre-built, code-signed `.app` for every release and support development at the same time. Pre-built binaries are distributed only there.
 - **🛠️ Build from source:** free forever. See [Build From Source](#build-from-source).
+
+Requires macOS 14 or later on Apple Silicon. See the [changelog](CHANGELOG.md) for what is new.
 
 ## What It Does
 
-- Installs from a curated **174-item catalog** across Browsers, AI/Coding, Dev, Cybersecurity, Productivity, Design, Communication, Cloud, Utilities, and Media.
+- Installs from a curated **172-item catalog** across Browsers, AI/Coding, Dev, Cybersecurity, Productivity, Design, Communication, Cloud, Utilities, and Media.
 - Detects what is already installed through **Homebrew** and `/Applications`.
 - Shows app states directly in the catalog:
   - `Instalar`
@@ -121,7 +123,7 @@ The catalog supports:
 
 The catalog includes tools like:
 
-- Browsers: Brave, Firefox, Chrome, Arc, LibreWolf, Zen, Opera
+- Browsers: Brave, Firefox, Chrome, LibreWolf, Zen, Opera
 - AI/Coding: Claude, Codex CLI, Claude Code, Ollama, LM Studio, Cursor, Devin Desktop, Zed, Pear Desktop
 - Dev: Git (Homebrew), Node.js, GitHub CLI, OrbStack, iTerm2, Ghostty, tmux, Fish
 - Cybersecurity: Wireshark, Burp Suite CE, Proxyman, nmap, ffuf, sqlmap, hashcat
@@ -240,7 +242,6 @@ pkill -f "MT3K Mac Tools"
 
 ## Roadmap Ideas
 
-- Public signed/notarized release
 - Dedicated screenshot gallery
 - More system tweak modules
 - Dotfiles/bootstrap workflows
@@ -253,8 +254,8 @@ pkill -f "MT3K Mac Tools"
 MT3K Mac Tools is free and open source. If it saves you time setting up a
 Mac, consider supporting development on [Patreon](https://www.patreon.com/MT3K).
 
-Patrons ($5+) get **signed pre-built releases early** (before the public
-notarized release lands) and a voice in the roadmap.
+Patrons ($5+) get the **signed pre-built app for every release** and a voice in
+the roadmap. Building from source stays free.
 
 ## License
 
