@@ -91,7 +91,7 @@ struct AppsView: View {
                         categorySection(title: category.rawValue, symbol: category.symbol, items: items)
                     }
                 }
-                if filteredItems.isEmpty && homebrewSearch.results.isEmpty && !homebrewSearch.isSearching {
+                if filteredItems.isEmpty && !(showsHomebrewResults && (homebrewSearch.isSearching || !homebrewSearch.results.isEmpty)) {
                     emptyState
                 }
                 homebrewSection
@@ -477,9 +477,14 @@ struct AppsView: View {
         item.install.brewPackageName.map { $0.components(separatedBy: "/").last ?? $0 }
     })
 
+    private var showsHomebrewResults: Bool {
+        (methodFilter == .all || methodFilter == .brew) && visibilityFilter == .all && selectedCategory == nil
+    }
+
     @ViewBuilder
     private var homebrewSection: some View {
-        if homebrewSearch.isSearching || !homebrewSearch.results.isEmpty {
+        // Sólo con los filtros en "Todo"/"Brew": estos resultados no pasan por los demás filtros.
+        if showsHomebrewResults, homebrewSearch.isSearching || !homebrewSearch.results.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "shippingbox.fill").foregroundColor(Theme.accent)

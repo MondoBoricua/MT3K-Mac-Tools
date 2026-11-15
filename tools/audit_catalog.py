@@ -92,6 +92,33 @@ def check_brew(items):
                     findings.append(f"{item['id']}: appName {item['app']!r} but the cask installs {apps}")
 
 
+def check_taps(items):
+    """Tap packages live outside homebrew-core/cask: check the tap repo still ships the file."""
+    for item in items:
+        if item["kind"] != "brewTap":
+            continue
+        parts = item["arg"].split("/")
+        if len(parts) != 3:
+            findings.append(f"{item['id']}: tap reference {item['arg']!r} is not owner/tap/name")
+            continue
+        owner, tap, name = parts
+        base = f"https://raw.githubusercontent.com/{owner}/homebrew-{tap}/HEAD"
+        found = False
+        for folder in ("Casks/", "Formula/", ""):
+            try:
+                with urllib.request.urlopen(f"{base}/{folder}{name}.rb", timeout=20) as response:
+                    found = response.status == 200
+            except urllib.error.HTTPError:
+                found = False
+            except OSError as error:
+                findings.append(f"{item['id']}: tap {item['arg']} could not be checked ({error})")
+                found = True
+            if found:
+                break
+        if not found:
+            findings.append(f"{item['id']}: tap {owner}/{tap} no longer ships {name}")
+
+
 def check_npm(items):
     for item in items:
         if item["kind"] != "npm":
@@ -136,6 +163,7 @@ def check_ollama():
 def main():
     items = catalog_items()
     check_brew(items)
+    check_taps(items)
     check_npm(items)
     check_presets(items)
     check_ollama()
