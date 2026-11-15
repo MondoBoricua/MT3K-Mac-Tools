@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+- Stats and the menu bar popover show the real battery cycle count (it read 0 on recent macOS) and no longer say "charging" while the charge is paused at the limit.
+
 ## 1.1 — 2026-11-15
 
 ### Catalog
