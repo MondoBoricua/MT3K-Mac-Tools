@@ -62,13 +62,22 @@ enum StatsParsers {
     /// Exige la key exacta "CycleCount": el substring aparece también en
     /// "DesignCycleCount9C" (~1000), que antes sobreescribía el valor real.
     static func cycleCount(fromIoreg raw: String) -> Int {
+        // La key también aparece embebida en la línea "BatteryData" = {...}; sólo vale
+        // la línea cuya key propia es CycleCount.
         for line in raw.split(whereSeparator: \.isNewline) {
-            if line.contains("\"CycleCount\"") {
-                let digits = line.filter { $0.isNumber }
-                return Int(digits) ?? 0
-            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("\"CycleCount\"") else { continue }
+            return Int(trimmed.filter { $0.isNumber }) ?? 0
         }
         return 0
+    }
+
+    /// Estado de carga desde `pmset -g batt`. "not charging" (pausado por un límite) y
+    /// "discharging" contienen el substring "charging" y no cuentan como cargando.
+    static func isCharging(fromPmset raw: String) -> Bool {
+        let text = raw.lowercased()
+        if text.contains("discharging") || text.contains("not charging") { return false }
+        return text.contains("charging") || text.contains("charged")
     }
 
     /// Línea "CPU usage: X% user, Y% sys, Z% idle" de `top -l 1 -n 0`.

@@ -117,6 +117,24 @@ struct CycleCountTests {
         #expect(StatsParsers.cycleCount(fromIoreg: ioreg) == 187)
     }
 
+    @Test("Ignora el CycleCount embebido en BatteryData")
+    func embeddedInBatteryData() {
+        let raw = """
+              "BatteryData" = {"Ra03"=38,"CycleCount"=137,"Voltage"=12431}
+              "IsCharging" = No
+              "CycleCount" = 137
+        """
+        #expect(StatsParsers.cycleCount(fromIoreg: raw) == 137)
+    }
+
+    @Test("pmset: 'not charging' y 'discharging' no cuentan como cargando")
+    func chargingState() {
+        #expect(!StatsParsers.isCharging(fromPmset: "80%; AC attached; not charging present: true"))
+        #expect(!StatsParsers.isCharging(fromPmset: "64%; discharging; 3:10 remaining"))
+        #expect(StatsParsers.isCharging(fromPmset: "64%; charging; 1:02 remaining"))
+        #expect(StatsParsers.isCharging(fromPmset: "100%; charged; 0:00 remaining"))
+    }
+
     @Test("Salida sin CycleCount devuelve 0")
     func missingKey() {
         #expect(StatsParsers.cycleCount(fromIoreg: "\"DesignCycleCount9C\" = 1000") == 0)

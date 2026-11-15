@@ -37,6 +37,7 @@ struct LiveStats {
 
     var batteryPercent: Int = -1
     var batteryCharging: Bool = false
+    var batteryOnAC: Bool = false
     var batteryCycles: Int = 0
     var batteryCondition: String = ""
 
@@ -141,6 +142,7 @@ final class StatsState: ObservableObject {
         let bat = await captureBattery()
         s.batteryPercent = bat.percent
         s.batteryCharging = bat.charging
+        s.batteryOnAC = bat.onAC
         s.batteryCycles = bat.cycles
         s.batteryCondition = bat.condition
 
@@ -170,22 +172,17 @@ final class StatsState: ObservableObject {
 
     // MARK: - Captura individual
 
-    private struct BatteryVals { var percent: Int; var charging: Bool; var cycles: Int; var condition: String }
+    private struct BatteryVals { var percent: Int; var charging: Bool; var onAC: Bool; var cycles: Int; var condition: String }
     private func captureBattery() async -> BatteryVals {
         let out = await run("/usr/bin/pmset", ["-g", "batt"])
         var percent = -1
-        var charging = false
         if let m = out.range(of: #"(\d+)%"#, options: .regularExpression) {
             percent = Int(out[m].dropLast()) ?? -1
         }
-        if out.contains("charging") || out.contains("charged") || out.contains("AC attached") {
-            charging = true
-        }
-        if out.contains("discharging") {
-            charging = false
-        }
+        let charging = StatsParsers.isCharging(fromPmset: out)
         let cycles = await SystemMetricsCollector.shared.batteryCycles(maxAge: refreshInterval)
-        return BatteryVals(percent: percent, charging: charging, cycles: cycles, condition: "")
+        let onAC = out.contains("AC attached") || out.contains("AC Power")
+        return BatteryVals(percent: percent, charging: charging, onAC: onAC, cycles: cycles, condition: "")
     }
 
     private struct ThermalVals { var state: Int; var label: String }
@@ -392,7 +389,7 @@ struct StatsSection: View {
             StatsTile(
                 title: "Batería",
                 value: "\(state.stats.batteryPercent)%",
-                detail: "\(state.stats.batteryCharging ? "Cargando" : "Descargando") · \(state.stats.batteryCycles) ciclos",
+                detail: "\(state.stats.batteryCharging ? "Cargando" : (state.stats.batteryOnAC ? "En AC, sin cargar" : "Descargando")) · \(state.stats.batteryCycles) ciclos",
                 symbol: state.stats.batteryCharging ? "battery.100.bolt" : "battery.50",
                 fill: Double(state.stats.batteryPercent) / 100.0,
                 color: state.stats.batteryPercent < 20 ? Theme.sevCritical : Theme.green
