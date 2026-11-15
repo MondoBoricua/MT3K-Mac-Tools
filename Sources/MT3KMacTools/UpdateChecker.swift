@@ -30,13 +30,14 @@ final class UpdateChecker: ObservableObject {
         let last = defaults.object(forKey: Self.lastCheckKey) as? Date ?? .distantPast
         guard Date().timeIntervalSince(last) >= Self.checkInterval else { return }
 
+        // El intento cuenta aunque falle (sin red, rate limit): como mucho una petición al día.
+        defaults.set(Date(), forKey: Self.lastCheckKey)
         var request = URLRequest(url: Self.latestReleaseURL)
         request.timeoutInterval = 10
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let tag = Self.tagName(fromReleaseJSON: data) else { return }
-        defaults.set(Date(), forKey: Self.lastCheckKey)
         defaults.set(tag, forKey: Self.latestVersionKey)
         publish(tag)
     }

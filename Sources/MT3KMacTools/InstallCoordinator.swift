@@ -118,6 +118,37 @@ final class InstallCoordinator: ObservableObject {
         }
     }
 
+    /// Script que corre en Terminal para casks con .pkg. Todo texto externo (nombre visible,
+    /// token del cask) entra entre comillas simples: nunca se interpreta como shell.
+    nonisolated static func terminalScript(brew: String, action: String, caskName: String, displayName: String, force: Bool) -> String {
+        let forceFlag = force ? "--force " : ""
+        return """
+        #!/bin/zsh
+        printf "\\033[1;35m"
+        echo "════════════════════════════════════════════════════════"
+        printf '%s\\n' \(shellQuote(" MT3K Mac Tools — Instalando \(displayName)"))
+        echo "════════════════════════════════════════════════════════"
+        printf "\\033[0m"
+        echo "Este cask incluye un .pkg de sistema. macOS te va a pedir"
+        echo "tu contraseña de admin durante el install."
+        echo ""
+        \(shellQuote(brew)) \(action) --cask \(forceFlag)\(shellQuote(caskName))
+        ec=$?
+        echo ""
+        if [ $ec -eq 0 ]; then
+          printf '\\033[1;32m✓ %s instalado correctamente.\\033[0m\\n' \(shellQuote(displayName))
+        else
+          printf "\\033[1;31m✗ Install falló con exit $ec.\\033[0m\\n"
+        fi
+        echo ""
+        echo "Podés cerrar esta ventana de Terminal."
+        """
+    }
+
+    private nonisolated static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
     private func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
@@ -266,33 +297,12 @@ final class InstallCoordinator: ObservableObject {
         log.append("\(item.name): abriendo \(terminalName) para completar \(command)...", level: .info)
         statuses[item.id] = .terminal("Completá el \(command) en Terminal")
 
-        let brew = "/opt/homebrew/bin/brew"
-        let forceFlag = force ? "--force " : ""
-        let brewAction = command == "upgrade" ? "upgrade" : "install"
-        let body = """
-        #!/bin/zsh
-        printf "\\033[1;35m"
-        echo "════════════════════════════════════════════════════════"
-        echo " MT3K Mac Tools — Instalando \(item.name)"
-        echo "════════════════════════════════════════════════════════"
-        printf "\\033[0m"
-        echo "Este cask incluye un .pkg de sistema. macOS te va a pedir"
-        echo "tu contraseña de admin durante el install."
-        echo ""
-        \(brew) \(brewAction) --cask \(forceFlag)\(caskName)
-        ec=$?
-        echo ""
-        if [ $ec -eq 0 ]; then
-          printf "\\033[1;32m✓ \(item.name) instalado correctamente.\\033[0m\\n"
-        else
-          printf "\\033[1;31m✗ Install falló con exit $ec.\\033[0m\\n"
-        fi
-        echo ""
-        echo "Podés cerrar esta ventana de Terminal."
-        """
+        let body = Self.terminalScript(
+            brew: "/opt/homebrew/bin/brew", action: command == "upgrade" ? "upgrade" : "install",
+            caskName: caskName, displayName: item.name, force: force)
 
         let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mt3k-\(item.id)-\(UUID().uuidString).command")
+            .appendingPathComponent("mt3k-\(item.id.filter { $0.isLetter || $0.isNumber || $0 == "-" })-\(UUID().uuidString).command")
         do {
             try body.write(to: tmp, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tmp.path)

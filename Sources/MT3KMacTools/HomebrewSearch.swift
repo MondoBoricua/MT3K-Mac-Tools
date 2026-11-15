@@ -30,9 +30,10 @@ final class HomebrewSearch: ObservableObject {
             try? await Task.sleep(for: Self.debounce)
             guard let self, !Task.isCancelled else { return }
             await self.loadNamesIfNeeded()
-            let casks = Self.matches(query: query, in: self.caskNames, excluding: catalogPackages, limit: Self.resultLimit)
-            let formulae = Self.matches(query: query, in: self.formulaNames, excluding: catalogPackages,
-                                        limit: max(0, Self.resultLimit - casks.count))
+            let ranked = Self.ranked(query: query, casks: self.caskNames, formulae: self.formulaNames,
+                                     excluding: catalogPackages, limit: Self.resultLimit)
+            let casks = ranked.filter(\.isCask).map(\.name)
+            let formulae = ranked.filter { !$0.isCask }.map(\.name)
             var found: [CatalogItem] = []
             if !casks.isEmpty {
                 found += Self.items(fromInfoJSON: await Self.info(brewPath: brewPath, flag: "--cask", names: casks))
@@ -59,7 +60,8 @@ final class HomebrewSearch: ObservableObject {
         }.value
         caskNames = loaded.0
         formulaNames = loaded.1
-        namesLoaded = true
+        // Si el índice aún no existe (brew recién instalado) se reintenta en la próxima búsqueda.
+        namesLoaded = !(loaded.0.isEmpty && loaded.1.isEmpty)
     }
 
     private static func info(brewPath: String, flag: String, names: [String]) async -> Data {
@@ -75,19 +77,37 @@ final class HomebrewSearch: ObservableObject {
         name.range(of: #"^[a-z0-9][a-z0-9+@._-]*$"#, options: .regularExpression) != nil
     }
 
-    /// Coincidencias por prefijo primero y luego por contenido, sin los paquetes ya curados.
-    nonisolated static func matches(query: String, in names: [String], excluding: Set<String>, limit: Int) -> [String] {
+    /// Casks y fórmulas ordenados juntos: nombre exacto, luego prefijo (más corto primero),
+    /// luego contenido; sin los paquetes ya curados. Así un cask nunca tapa una fórmula exacta.
+    nonisolated static func ranked(query: String, casks: [String], formulae: [String],
+                                   excluding: Set<String>, limit: Int) -> [(name: String, isCask: Bool)] {
         guard limit > 0, !query.isEmpty else { return [] }
-        var prefix: [String] = []
-        var inner: [String] = []
-        for name in names where !excluding.contains(name) {
-            if name.hasPrefix(query) {
-                prefix.append(name)
-            } else if name.contains(query) {
-                inner.append(name)
+        var found: [(rank: Int, name: String, isCask: Bool)] = []
+        for (names, isCask) in [(casks, true), (formulae, false)] {
+            for name in names where !excluding.contains(name) {
+                if name == query {
+                    found.append((0, name, isCask))
+                } else if name.hasPrefix(query) {
+                    found.append((1, name, isCask))
+                } else if name.contains(query) {
+                    found.append((2, name, isCask))
+                }
             }
         }
-        return Array((prefix.sorted { $0.count < $1.count } + inner).prefix(limit))
+        found.sort { a, b in
+            if a.rank != b.rank { return a.rank < b.rank }
+            if a.name.count != b.name.count { return a.name.count < b.name.count }
+            if a.name != b.name { return a.name < b.name }
+            return a.isCask && !b.isCask
+        }
+        return found.prefix(limit).map { ($0.name, $0.isCask) }
+    }
+
+    /// El nombre visible viene de metadatos externos: sin caracteres de control y acotado.
+    nonisolated static func displayName(_ raw: String?, fallback: String) -> String {
+        let cleaned = String((raw ?? "").unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? fallback : String(cleaned.prefix(60))
     }
 
     /// Convierte la salida de `brew info --json=v2` en filas instalables. Descarta lo que
@@ -129,8 +149,8 @@ final class HomebrewSearch: ObservableObject {
             }
             items.append(CatalogItem(
                 id: "brew-cask:\(cask.token)",
-                name: cask.name?.first ?? cask.token,
-                description: cask.desc ?? "Cask de Homebrew.",
+                name: displayName(cask.name?.first, fallback: cask.token),
+                description: displayName(cask.desc, fallback: "Cask de Homebrew."),
                 symbol: "shippingbox.fill",
                 install: .brewCask(cask.token),
                 category: .utilities,
@@ -142,7 +162,7 @@ final class HomebrewSearch: ObservableObject {
             items.append(CatalogItem(
                 id: "brew-formula:\(formula.name)",
                 name: formula.name,
-                description: formula.desc ?? "Fórmula de Homebrew.",
+                description: displayName(formula.desc, fallback: "Fórmula de Homebrew."),
                 symbol: "terminal.fill",
                 install: .brewFormula(formula.name),
                 category: .utilities

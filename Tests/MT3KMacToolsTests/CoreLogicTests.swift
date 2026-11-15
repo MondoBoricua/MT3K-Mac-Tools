@@ -565,13 +565,30 @@ struct UpdateCheckerTests {
 
 @Suite("Búsqueda en el índice de Homebrew")
 struct HomebrewSearchTests {
-    @Test("Prefijo antes que contenido, sin los ya curados y con límite")
-    func matching() {
-        let names = ["zed", "rectangle", "rectangle-pro", "hyperkey", "superkey", "keycastr", "key-codes"]
-        let found = HomebrewSearch.matches(query: "key", in: names, excluding: ["keycastr"], limit: 3)
-        #expect(found == ["key-codes", "hyperkey", "superkey"])
-        #expect(HomebrewSearch.matches(query: "rect", in: names, excluding: ["rectangle"], limit: 5) == ["rectangle-pro"])
-        #expect(HomebrewSearch.matches(query: "x", in: names, excluding: [], limit: 0).isEmpty)
+    @Test("Exacto, luego prefijo, luego contenido; sin los ya curados y con límite")
+    func ranking() {
+        let casks = ["zed", "rectangle", "rectangle-pro", "hyperkey", "superkey", "keycastr", "key-codes"]
+        let found = HomebrewSearch.ranked(query: "key", casks: casks, formulae: [], excluding: ["keycastr"], limit: 3)
+        #expect(found.map(\.name) == ["key-codes", "hyperkey", "superkey"])
+        #expect(HomebrewSearch.ranked(query: "rect", casks: casks, formulae: [], excluding: ["rectangle"], limit: 5)
+            .map(\.name) == ["rectangle-pro"])
+        #expect(HomebrewSearch.ranked(query: "x", casks: casks, formulae: ["x"], excluding: [], limit: 0).isEmpty)
+    }
+
+    @Test("Una fórmula con el nombre exacto no queda tapada por muchos casks")
+    func exactFormulaWins() {
+        let casks = (1...40).map { "ack-tool-\($0)" }
+        let found = HomebrewSearch.ranked(query: "ack", casks: casks, formulae: ["ack", "tack"], excluding: [], limit: 8)
+        #expect(found.first?.name == "ack")
+        #expect(found.first?.isCask == false)
+        #expect(found.count == 8)
+    }
+
+    @Test("El nombre visible pierde caracteres de control y se acota")
+    func displayNames() {
+        #expect(HomebrewSearch.displayName("Key\u{07}Castr\n", fallback: "x") == "KeyCastr")
+        #expect(HomebrewSearch.displayName(nil, fallback: "token") == "token")
+        #expect(HomebrewSearch.displayName(String(repeating: "a", count: 200), fallback: "x").count == 60)
     }
 
     @Test("Sólo acepta nombres con forma de paquete de Homebrew")
@@ -608,5 +625,32 @@ struct HomebrewSearchTests {
         #expect(items[2].appName == "New Name.app")
         #expect(items[3].install == .brewFormula("ripgrep"))
         #expect(HomebrewSearch.items(fromInfoJSON: Data("nope".utf8)).isEmpty)
+    }
+}
+
+@Suite("Script de Terminal para casks con .pkg")
+struct TerminalScriptTests {
+    @Test("Un nombre o token con sintaxis de shell no se ejecuta")
+    func hostileMetadataIsInert() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mt3k-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let marker = dir.appendingPathComponent("pwned").path
+        let script = InstallCoordinator.terminalScript(
+            brew: "/usr/bin/true", action: "install",
+            caskName: "demo; touch \(marker)",
+            displayName: "Demo $(touch \(marker)) `touch \(marker)` '; touch \(marker); '",
+            force: false)
+        let file = dir.appendingPathComponent("run.command")
+        try script.write(to: file, atomically: true, encoding: .utf8)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = [file.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+        #expect(!FileManager.default.fileExists(atPath: marker))
     }
 }
