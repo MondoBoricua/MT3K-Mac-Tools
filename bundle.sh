@@ -3,7 +3,7 @@ set -e
 
 APP_NAME="MT3K Mac Tools"
 BUNDLE_ID="com.mt3k.mac-tools"
-VERSION="1.1"
+VERSION="1.1.1"
 BUILD_CONFIG="${1:-release}"
 INSTALL_TO_APPLICATIONS="${MT3K_INSTALL_TO_APPLICATIONS:-1}"
 
