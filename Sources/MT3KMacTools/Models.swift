@@ -47,10 +47,34 @@ final class BrewState: ObservableObject {
     @Published var isRefreshing: Bool = false
     @Published var installedPackages: Set<String> = []
     @Published var outdatedPackages: Set<String> = []
+    /// Nombres de los bundles en /Applications. Se lee una vez por refresh para que
+    /// las filas del catálogo no consulten el disco en cada render.
+    @Published var applications: Set<String> = []
+    private var installObserver: NSObjectProtocol?
+
+    init() {
+        installObserver = NotificationCenter.default.addObserver(
+            forName: .mt3kBrewStateChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.rescanApplications() }
+        }
+        rescanApplications()
+    }
+
+    func appExists(_ appName: String?) -> Bool {
+        guard let appName else { return false }
+        return applications.contains(appName)
+    }
+
+    func rescanApplications() {
+        let found = Set((try? FileManager.default.contentsOfDirectory(atPath: "/Applications")) ?? [])
+        if found != applications { applications = found }
+    }
 
     func refresh() async {
         isRefreshing = true
         defer { isRefreshing = false }
+        rescanApplications()
         async let brew = detect("brew")
         async let node = detect("node")
         let (b, n) = await (brew, node)
