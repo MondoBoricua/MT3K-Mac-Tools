@@ -42,6 +42,11 @@ final class HomebrewSearch: ObservableObject {
                 found += Self.items(fromInfoJSON: await Self.info(brewPath: brewPath, flag: "--formula", names: formulae))
             }
             guard !Task.isCancelled else { return }
+            // brew info devuelve casks y fórmulas por separado: restaurar el orden del ranking.
+            let order = Dictionary(uniqueKeysWithValues: ranked.enumerated().map { index, entry in
+                ("\(entry.isCask ? "brew-cask" : "brew-formula"):\(entry.name)", index)
+            })
+            found.sort { (order[$0.id] ?? Int.max) < (order[$1.id] ?? Int.max) }
             self.results = found
             self.isSearching = false
         }
