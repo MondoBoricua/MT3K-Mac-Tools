@@ -8,6 +8,7 @@ struct AppsView: View {
 
     @State private var brewBusy = false
     @State private var query = ""
+    @StateObject private var homebrewSearch = HomebrewSearch()
     @State private var selectedCategory: CatalogCategory? = nil
     @State private var methodFilter: MethodFilter = .all
     @State private var visibilityFilter: VisibilityFilter = .all
@@ -90,13 +91,17 @@ struct AppsView: View {
                         categorySection(title: category.rawValue, symbol: category.symbol, items: items)
                     }
                 }
-                if filteredItems.isEmpty {
+                if filteredItems.isEmpty && homebrewSearch.results.isEmpty && !homebrewSearch.isSearching {
                     emptyState
                 }
+                homebrewSection
                 LogView()
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .onChange(of: query) {
+            homebrewSearch.search(query, brewPath: brew.brewPath, excluding: Self.catalogPackages)
         }
         .alert("Instalar security toolkit", isPresented: $confirmSecurityQueue) {
             Button("Instalar") {
@@ -465,6 +470,36 @@ struct AppsView: View {
         .background(Theme.bgCard)
         .cornerRadius(12)
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+    }
+
+    /// Paquetes brew que ya están en el catálogo curado (no se repiten en "Más en Homebrew").
+    private static let catalogPackages: Set<String> = Set(Catalog.items.compactMap { item in
+        item.install.brewPackageName.map { $0.components(separatedBy: "/").last ?? $0 }
+    })
+
+    @ViewBuilder
+    private var homebrewSection: some View {
+        if homebrewSearch.isSearching || !homebrewSearch.results.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "shippingbox.fill").foregroundColor(Theme.accent)
+                    Text("Más en Homebrew").font(.headline)
+                    if homebrewSearch.isSearching { ProgressView().controlSize(.small) }
+                    Spacer()
+                    Text("fuera del catálogo curado").font(.caption).foregroundColor(Theme.textSecondary)
+                }
+                .padding(.bottom, 4)
+                ForEach(homebrewSearch.results) { item in
+                    InstallRow(item: item, isSelected: false, selectionEnabled: false, onSelectionChange: { _ in })
+                    if item.id != homebrewSearch.results.last?.id {
+                        Divider().background(Theme.border)
+                    }
+                }
+            }
+            .padding(20)
+            .background(Theme.bgCard)
+            .cornerRadius(12)
+        }
     }
 
     private var emptyState: some View {

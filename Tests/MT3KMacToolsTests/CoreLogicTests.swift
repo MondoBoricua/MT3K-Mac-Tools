@@ -562,3 +562,51 @@ struct UpdateCheckerTests {
         #expect(UpdateChecker.tagName(fromReleaseJSON: Data("{}".utf8)) == nil)
     }
 }
+
+@Suite("Búsqueda en el índice de Homebrew")
+struct HomebrewSearchTests {
+    @Test("Prefijo antes que contenido, sin los ya curados y con límite")
+    func matching() {
+        let names = ["zed", "rectangle", "rectangle-pro", "hyperkey", "superkey", "keycastr", "key-codes"]
+        let found = HomebrewSearch.matches(query: "key", in: names, excluding: ["keycastr"], limit: 3)
+        #expect(found == ["key-codes", "hyperkey", "superkey"])
+        #expect(HomebrewSearch.matches(query: "rect", in: names, excluding: ["rectangle"], limit: 5) == ["rectangle-pro"])
+        #expect(HomebrewSearch.matches(query: "x", in: names, excluding: [], limit: 0).isEmpty)
+    }
+
+    @Test("Sólo acepta nombres con forma de paquete de Homebrew")
+    func validNames() {
+        #expect(HomebrewSearch.isValidPackageName("font-hack-nerd-font"))
+        #expect(HomebrewSearch.isValidPackageName("python@3.14"))
+        #expect(HomebrewSearch.isValidPackageName("0-ad"))
+        #expect(!HomebrewSearch.isValidPackageName("--force"))
+        #expect(!HomebrewSearch.isValidPackageName("foo; rm -rf ~"))
+        #expect(!HomebrewSearch.isValidPackageName("Foo"))
+        #expect(!HomebrewSearch.isValidPackageName(""))
+    }
+
+    @Test("Convierte brew info en filas: app, pkg → Terminal, descarta deshabilitados")
+    func parsing() {
+        let json = Data(#"""
+        {"formulae":[{"name":"ripgrep","desc":"Search tool","deprecated":false,"disabled":false},
+                     {"name":"oldtool","desc":"x","deprecated":true,"disabled":false}],
+         "casks":[{"token":"keycastr","name":["KeyCastr"],"desc":"Keystroke visualiser","deprecated":false,"disabled":false,
+                   "artifacts":[{"app":["KeyCastr.app"]},{"zap":[{"trash":["~/x"]}]}]},
+                  {"token":"some-vpn","name":["Some VPN"],"desc":"VPN","deprecated":false,"disabled":false,
+                   "artifacts":[{"pkg":["Some.pkg"]},{"uninstall":[{"pkgutil":"x"}]}]},
+                  {"token":"renamed","name":["Renamed"],"desc":"x","deprecated":false,"disabled":false,
+                   "artifacts":[{"app":["old.app",{"target":"New Name.app"}]}]},
+                  {"token":"gone","name":["Gone"],"desc":"x","deprecated":false,"disabled":true,"artifacts":[]}]}
+        """#.utf8)
+        let items = HomebrewSearch.items(fromInfoJSON: json)
+        #expect(items.map(\.id) == ["brew-cask:keycastr", "brew-cask:some-vpn", "brew-cask:renamed", "brew-formula:ripgrep"])
+        #expect(items[0].appName == "KeyCastr.app")
+        #expect(items[0].install == .brewCask("keycastr"))
+        #expect(!items[0].requiresAdminInstall)
+        #expect(items[1].requiresAdminInstall)
+        #expect(items[1].appName == nil)
+        #expect(items[2].appName == "New Name.app")
+        #expect(items[3].install == .brewFormula("ripgrep"))
+        #expect(HomebrewSearch.items(fromInfoJSON: Data("nope".utf8)).isEmpty)
+    }
+}
